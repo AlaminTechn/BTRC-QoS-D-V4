@@ -3,25 +3,26 @@
   "version": "4.0.0",
   "private": true,
   "scripts": {
-    "dev":     "vite --host",
-    "build":   "vite build",
+    "dev": "vite --host",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "react":              "^18.3.1",
-    "react-dom":          "^18.3.1",
-    "react-router-dom":   "^6.26.1",
-    "react-leaflet":      "^4.2.1",
-    "leaflet":            "^1.9.4",
-    "antd":               "^5.21.6",
-    "@ant-design/icons":  "^5.5.1",
-    "axios":              "^1.7.9",
-    "echarts":            "^5.5.1",
-    "echarts-for-react":  "^3.0.2",
-    "dayjs":              "^1.11.13"
+    "@ant-design/icons": "^5.5.1",
+    "antd": "^5.21.6",
+    "axios": "^1.7.9",
+    "dayjs": "^1.11.13",
+    "echarts": "^5.5.1",
+    "echarts-for-react": "^3.0.2",
+    "leaflet": "^1.9.4",
+    "protomaps-leaflet": "^5.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.26.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "vite":                 "^5.4.1"
+    "vite": "^5.4.1"
   }
 }

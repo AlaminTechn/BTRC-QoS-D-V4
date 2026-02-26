@@ -11,9 +11,13 @@ btrc-frontend/.vite/
 .env.local
 .env.*.local
 
-# Tiles (large binary files)
+# Tiles (large binary files — download with scripts/download-tiles.sh)
 tiles/*.pmtiles
 tiles/*.mbtiles
+btrc-frontend/public/tiles/
+
+# Vendor packages (local workaround — see btrc-frontend/VENDOR.md)
+btrc-frontend/src/vendor/
 
 # Docker volumes / data
 postgres-data/

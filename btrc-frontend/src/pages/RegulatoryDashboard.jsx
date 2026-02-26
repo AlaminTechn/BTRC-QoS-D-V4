@@ -228,7 +228,8 @@ function R2Tab() {
 
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} showIcon />}
 
-      <Row gutter={12}>
+      {/* Top row: Map + Side summary */}
+      <Row gutter={12} style={{ marginBottom: 12 }}>
         {/* Map */}
         <Col span={15}>
           <Card
@@ -256,9 +257,8 @@ function R2Tab() {
           </Card>
         </Col>
 
-        {/* Side panel */}
+        {/* Side panel — Division or District summary table */}
         <Col span={9}>
-          {/* Division table — national level */}
           {level === 'national' && (
             <Card title="R2.1 — Division Performance" size="small">
               <Table
@@ -271,21 +271,20 @@ function R2Tab() {
                 columns={[
                   { title: 'Division', dataIndex: 'name',
                     render: v => <Button type="link" size="small" onClick={() => drillToDiv(v)}>{v}</Button> },
-                  { title: 'Total', dataIndex: 'total', width: 55,
+                  { title: 'Total',    dataIndex: 'total',    width: 55,
                     sorter: (a, b) => a.total - b.total, defaultSortOrder: 'descend' },
                   { title: 'Critical', dataIndex: 'critical', width: 65,
                     render: v => v > 0 ? <Text type="danger">{v}</Text> : '—' },
-                  { title: 'High', dataIndex: 'high', width: 50,
+                  { title: 'High',     dataIndex: 'high',     width: 50,
                     render: v => v > 0 ? <Text style={{ color: '#f97316' }}>{v}</Text> : '—' },
                 ]}
-                size="small" pagination={false} rowKey="name"
+                size="small" pagination={false} rowKey="name" scroll={{ y: 420 }}
               />
             </Card>
           )}
 
-          {/* District table — division level */}
           {level === 'division' && (
-            <Card title={`Districts — ${selectedDiv}`} size="small" style={{ marginBottom: 10 }}>
+            <Card title={`R2.4 — Districts — ${selectedDiv}`} size="small">
               <Table
                 dataSource={
                   Object.entries(districtData)
@@ -300,13 +299,31 @@ function R2Tab() {
                   { title: 'Critical', dataIndex: 'critical', width: 65,
                     render: v => v > 0 ? <Text type="danger">{v}</Text> : '—' },
                 ]}
-                size="small" scroll={{ y: 190 }} pagination={false}
+                size="small" scroll={{ y: 420 }} pagination={false}
               />
             </Card>
           )}
 
-          {/* ISP table — division / district level */}
-          {level !== 'national' && (
+          {level === 'district' && (
+            <Card title={`${selectedDist}`} size="small">
+              <div style={{ padding: '12px 0' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Division: <strong>{selectedDiv}</strong>
+                </Text>
+                <br />
+                <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+                  Showing PoP markers and ISP performance below.
+                </Text>
+              </div>
+            </Card>
+          )}
+        </Col>
+      </Row>
+
+      {/* Bottom row: ISP Performance Table — full width (shown after drilling) */}
+      {level !== 'national' && (
+        <Row>
+          <Col span={24}>
             <Card
               title={`R2.3 — ISP Performance: ${selectedDist || selectedDiv}`}
               size="small"
@@ -316,13 +333,13 @@ function R2Tab() {
                 columns={ispCols}
                 loading={loading}
                 size="small"
-                scroll={{ x: 500, y: level === 'division' ? 200 : 380 }}
-                pagination={{ pageSize: 10, size: 'small' }}
+                scroll={{ x: 700, y: 300 }}
+                pagination={{ pageSize: 15, size: 'small', showTotal: t => `${t} ISPs` }}
               />
             </Card>
-          )}
-        </Col>
-      </Row>
+          </Col>
+        </Row>
+      )}
     </div>
   );
 }

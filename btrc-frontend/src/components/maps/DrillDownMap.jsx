@@ -17,26 +17,39 @@
  *   1. CartoDB No-Labels base tile (z-index default) — clean base
  *   2. Division / district choropleth GeoJSON (overlayPane 400)
  *   3. Division context outline GeoJSON (overlayPane 400)
- *   4. GeoLabelLayer — centroid labels (labelPane 450)
- *   5. PoP CircleMarker (popPane 500)
+ *   4. Bangladesh mask — inverted world polygon, hides surrounding countries (overlayPane 400)
+ *   5. GeoLabelLayer — centroid labels (labelPane 450)
+ *   6. PoP CircleMarker (popPane 500)
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   MapContainer, TileLayer, GeoJSON, CircleMarker,
   Tooltip, useMap, LayersControl,
 } from 'react-leaflet';
+import { createLayerComponent } from '@react-leaflet/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Spin } from 'antd';
+import { Spin, Tooltip as AntTooltip } from 'antd';
+import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from '../../i18n';
+import { leafletLayer as protomapsLeafletLayer } from 'protomaps-leaflet';
+
+// ── ProtomapsLayer — React-Leaflet BaseLayer-compatible Protomaps wrapper ─────
+// Uses createLayerComponent to expose the Leaflet layer instance through
+// react-leaflet's context so LayersControl can properly add/remove it.
+const ProtomapsLayer = createLayerComponent(
+  ({ url, theme = 'light' }, ctx) => ({
+    instance: protomapsLeafletLayer({ url, theme }),
+    context:  ctx,
+  }),
+);
 
 // ── Tile sources ──────────────────────────────────────────────────────────────
 const CARTO_NL_URL  = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
 const CARTO_NL_ATTR = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors &copy; CARTO';
 const OSM_URL       = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTR      = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>';
-const TILE_URL      = import.meta.env.VITE_TILE_URL || null;
 
 // ── Bangladesh initial view ───────────────────────────────────────────────────
 const BD_CENTER = [23.68, 90.35];
@@ -72,7 +85,11 @@ const popColor = (violations) =>
 const FitBounds = ({ bounds }) => {
   const map = useMap();
   useEffect(() => {
-    if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+    } else {
+      map.setView(BD_CENTER, BD_ZOOM, { animate: true });
+    }
   }, [bounds, map]);
   return null;
 };
@@ -122,6 +139,45 @@ const GeoLabelLayer = ({ geoJSON, nameKey, getLabel }) => {
   return null;
 };
 
+// ── BangladeshMask — inverted world polygon that hides surrounding countries ──
+// Builds a GeoJSON polygon covering the whole region EXCEPT Bangladesh.
+// Each division's outer ring becomes a "hole" (evenodd fill rule → transparent).
+const buildMaskGeoJSON = (divGeoJSON) => {
+  if (!divGeoJSON) return null;
+  const rings = [];
+  divGeoJSON.features.forEach((f) => {
+    const geom = f.geometry;
+    if (geom.type === 'Polygon') {
+      rings.push(geom.coordinates[0]);
+    } else if (geom.type === 'MultiPolygon') {
+      geom.coordinates.forEach((poly) => rings.push(poly[0]));
+    }
+  });
+  if (!rings.length) return null;
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      // First ring = outer box (covers the region); subsequent rings = holes for Bangladesh
+      // GeoJSON uses [lng, lat] — box covers South/Southeast Asia visible area
+      coordinates: [
+        [[30, -20], [150, -20], [150, 65], [30, 65], [30, -20]],
+        ...rings,
+      ],
+    },
+  };
+};
+
+// ── MapResizer — invalidates map size after container resize ──────────────────
+const MapResizer = () => {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 120);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+};
+
 // ── Main component ─────────────────────────────────────────────────────────────
 const DrillDownMap = ({
   height         = '520px',
@@ -141,8 +197,22 @@ const DrillDownMap = ({
   const [distGeoJSON, setDistGeoJSON] = useState(null);
   const [fitBounds,   setFitBounds]   = useState(null);
   const [loading,     setLoading]     = useState(true);
+  const [maximized,   setMaximized]   = useState(false);
+  const [resizeKey,   setResizeKey]   = useState(0);
   const divLayerRef  = useRef(null);
   const distLayerRef = useRef(null);
+
+  const toggleMaximize = useCallback(() => {
+    setMaximized(v => !v);
+    // Bump key so MapResizer fires after DOM settles
+    setResizeKey(k => k + 1);
+  }, []);
+
+  // Lock body scroll when maximized
+  useEffect(() => {
+    document.body.style.overflow = maximized ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [maximized]);
 
   // Load GeoJSON on mount
   useEffect(() => {
@@ -231,6 +301,9 @@ const DrillDownMap = ({
     layer.on('mouseout',  (e) => { e.target.setStyle(distStyle(feature)); });
   };
 
+  // ── Inverted mask — built once when divGeoJSON loads ─────────────────────
+  const bangMaskData = useMemo(() => buildMaskGeoJSON(divGeoJSON), [divGeoJSON]);
+
   // ── Division context outline (division/district level) ───────────────────
   const selectedDivOutlineGeoJSON = useMemo(() => {
     if (!divGeoJSON || level === 'national' || !selectedDiv) return null;
@@ -252,13 +325,26 @@ const DrillDownMap = ({
     );
   }
 
+  const containerStyle = maximized
+    ? {
+        position: 'fixed', inset: 0, zIndex: 2000,
+        background: '#f0f2f5', display: 'flex', flexDirection: 'column',
+      }
+    : { position: 'relative', height };
+
+  const mapStyle = maximized
+    ? { flex: 1, width: '100%' }
+    : { height: '100%', width: '100%' };
+
   return (
-    <div style={{ position: 'relative', height }}>
+    <div style={containerStyle}>
       <MapContainer
-        center={BD_CENTER} zoom={BD_ZOOM}
-        style={{ height: '100%', width: '100%' }}
+        key={`map-${maximized}`}
+        center={BD_CENTER} zoom={maximized ? 7 : BD_ZOOM}
+        style={mapStyle}
         zoomControl={true}
       >
+        <MapResizer key={resizeKey} />
         {/* 1. Pane setup (runs first, before GeoLabelLayer) */}
         <MapPaneSetup />
 
@@ -272,11 +358,9 @@ const DrillDownMap = ({
             <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
           </LayersControl.BaseLayer>
 
-          {TILE_URL && (
-            <LayersControl.BaseLayer name="Offline (PMTiles)">
-              <TileLayer url={TILE_URL} attribution="&copy; OpenStreetMap (offline)" maxZoom={18} />
-            </LayersControl.BaseLayer>
-          )}
+          <LayersControl.BaseLayer name="Offline (PMTiles)">
+            <ProtomapsLayer url="/pmtiles/bangladesh.pmtiles" theme="light" />
+          </LayersControl.BaseLayer>
 
           <LayersControl.BaseLayer name="Satellite">
             <TileLayer
@@ -286,7 +370,7 @@ const DrillDownMap = ({
           </LayersControl.BaseLayer>
         </LayersControl>
 
-        {fitBounds && <FitBounds bounds={fitBounds} />}
+        <FitBounds bounds={fitBounds} />
 
         {/* 3. Division choropleth (national level only) */}
         {divGeoJSON && level === 'national' && (
@@ -321,6 +405,20 @@ const DrillDownMap = ({
             data={filteredDistGeoJSON}
             style={distStyle}
             onEachFeature={onEachDist}
+          />
+        )}
+
+        {/* 5b. Bangladesh mask — fully opaque; holes reveal BD, completely hides surrounding area */}
+        {bangMaskData && (
+          <GeoJSON
+            key="bangladesh-mask"
+            data={bangMaskData}
+            style={() => ({
+              fillColor:   '#f0f2f5',
+              fillOpacity: 1,
+              stroke:      false,
+              weight:      0,
+            })}
           />
         )}
 
@@ -368,6 +466,54 @@ const DrillDownMap = ({
           </CircleMarker>
         ))}
       </MapContainer>
+
+      {/* ── Map controls: Maximize / Reset — grouped card below LayersControl ── */}
+      <div style={{
+        position: 'absolute', top: 52, right: 10, zIndex: 1001,
+        display: 'flex', flexDirection: 'column',
+        background: 'rgba(255,255,255,0.95)',
+        border: '2px solid rgba(0,0,0,0.2)',
+        borderRadius: 4,
+        boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
+        overflow: 'hidden',
+      }}>
+        <AntTooltip title={maximized ? 'Exit fullscreen' : 'Fullscreen map'} placement="left">
+          <button
+            onClick={toggleMaximize}
+            style={{
+              width: 30, height: 30, border: 'none', cursor: 'pointer',
+              background: 'transparent', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontSize: 14, color: '#333',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#f4f4f4'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            {maximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+          </button>
+        </AntTooltip>
+
+        {/* divider */}
+        <div style={{ height: 1, background: 'rgba(0,0,0,0.2)', margin: '0 4px' }} />
+
+        <AntTooltip title="Reset to Bangladesh view" placement="left">
+          <button
+            onClick={() => setFitBounds(null)}
+            style={{
+              width: 30, height: 30, border: 'none', cursor: 'pointer',
+              background: 'transparent', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontSize: 14, color: '#333',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = '#f4f4f4'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <ReloadOutlined />
+          </button>
+        </AntTooltip>
+      </div>
 
       {/* Colour legend */}
       <div style={{
