@@ -9,7 +9,7 @@
  * R3 Violation Analysis  — 3 scalars + trend chart + geo table + detail table
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Tabs, Card, Row, Col, Statistic, Table, Typography,
   Spin, Alert, Tag, Button, Space, Breadcrumb, Badge, Select,
@@ -20,8 +20,11 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import DrillDownMap from '../components/maps/DrillDownMap';
-import { useDrillData } from '../hooks/useDrillData';
+import { useDrillData, toGeoDiv } from '../hooks/useDrillData';
 import { useMetabaseCard } from '../hooks/useMetabaseCard';
+import { useAuth } from '../contexts/AuthContext';
+import { useFilteredCard } from '../hooks/useFilteredCard';
+import FilterBar from '../components/layout/FilterBar';
 import {
   REG_R1_COMPLIANT, REG_R1_AT_RISK, REG_R1_VIOLATION, REG_R1_ISP_SLA_TABLE,
   REG_R3_PENDING, REG_R3_DISPUTED, REG_R3_RESOLVED,
@@ -143,6 +146,20 @@ function R2Tab() {
     loading, error,
     drillToDiv, drillToDist, drillUp, resetDrill,
   } = useDrillData();
+
+  const { user, role } = useAuth();
+
+  // Auto-drill to assigned division for regional_officer role (once data is ready)
+  useEffect(() => {
+    if (
+      role === 'regional_officer' &&
+      user?.division &&
+      level === 'national' &&
+      !loading
+    ) {
+      drillToDiv(toGeoDiv(user.division));
+    }
+  }, [user?.id, role, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ispCols = [
     { title: 'ISP',        dataIndex: 'isp',              ellipsis: true },
@@ -314,25 +331,22 @@ function R2Tab() {
 // R3 — Violation Analysis
 // ══════════════════════════════════════════════════════════════════════════════
 function R3Tab() {
-  // Filters applied to the geo table
-  const [geoDiv,    setGeoDiv]    = useState(undefined);
-
-  // Filters applied to the detail table (server-side via Metabase template tags)
-  const [detailDiv,    setDetailDiv]    = useState(undefined);
+  // Card-level overrides (severity + status only — division comes from global FilterBar)
   const [detailSev,    setDetailSev]    = useState(undefined);
   const [detailStatus, setDetailStatus] = useState(undefined);
 
-  const detailParams = useMemo(() => {
+  const detailCardParams = useMemo(() => {
     const p = {};
-    if (detailDiv)    p.division = detailDiv;
     if (detailSev)    p.severity = detailSev;
     if (detailStatus) p.status   = detailStatus;
     return p;
-  }, [detailDiv, detailSev, detailStatus]);
+  }, [detailSev, detailStatus]);
 
+  // Trend: no global time filter — always shows rolling 14-day window
   const { rows: trendRows,  loading: tl } = useMetabaseCard(REG_R3_TREND);
-  const { rows: geoRows,    loading: gl } = useMetabaseCard(REG_R3_GEO, geoDiv ? { division: geoDiv } : {}, [geoDiv]);
-  const { rows: detailRows, loading: dl } = useMetabaseCard(REG_R3_DETAIL, detailParams, [detailDiv, detailSev, detailStatus]);
+  // Geo + Detail: merge global filters (division, start_date, end_date) + card-level overrides
+  const { rows: geoRows,    loading: gl } = useFilteredCard(REG_R3_GEO,    {},              ['division', 'start_date', 'end_date']);
+  const { rows: detailRows, loading: dl } = useFilteredCard(REG_R3_DETAIL, detailCardParams, ['division', 'district', 'isp', 'start_date', 'end_date']);
 
   const trendDays = useMemo(() =>
     [...new Set(trendRows.map(r => r.day))].sort(), [trendRows]);
@@ -417,16 +431,6 @@ function R3Tab() {
           <Card
             title="R3.6 — Violations by Geography"
             size="small"
-            extra={
-              <Select
-                placeholder="Division"
-                allowClear
-                style={{ width: 130, fontSize: 11 }}
-                size="small"
-                onChange={setGeoDiv}
-                options={[...new Set(geoRows.map(r => r.division).filter(Boolean))].map(v => ({ value: v, label: v }))}
-              />
-            }
           >
             {!REG_R3_GEO
               ? <NotConfigured name="REG_R3_GEO" />
@@ -450,16 +454,6 @@ function R3Tab() {
         extra={
           <Space wrap size={4}>
             <Select
-              placeholder="Division"
-              allowClear size="small"
-              style={{ width: 120, fontSize: 11 }}
-              onChange={setDetailDiv}
-              options={[
-                'Dhaka','Chattagram','Rajshahi','Khulna',
-                'Barishal','Sylhet','Rangpur','Mymensingh',
-              ].map(v => ({ value: v, label: v }))}
-            />
-            <Select
               placeholder="Severity"
               allowClear size="small"
               style={{ width: 100, fontSize: 11 }}
@@ -469,7 +463,7 @@ function R3Tab() {
             <Select
               placeholder="Status"
               allowClear size="small"
-              style={{ width: 115, fontSize: 11 }}
+              style={{ width: 128, fontSize: 11 }}
               onChange={setDetailStatus}
               options={['DETECTED','ACKNOWLEDGED','DISPUTED','WAIVED','RESOLVED'].map(v => ({ value: v, label: v }))}
             />
@@ -505,12 +499,17 @@ export default function RegulatoryDashboard() {
   ];
 
   return (
-    <div style={{ padding: '12px 16px' }}>
-      <Title level={4} style={{ margin: '0 0 12px' }}>
-        <GlobalOutlined style={{ marginRight: 8, color: '#1890ff' }} />
-        Regulatory Dashboard
-      </Title>
-      <Tabs defaultActiveKey="r2" items={items} type="card" />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Global filter bar — division / district / ISP / date range */}
+      <FilterBar />
+
+      <div style={{ padding: '12px 16px', flex: 1, overflow: 'auto' }}>
+        <Title level={4} style={{ margin: '0 0 12px' }}>
+          <GlobalOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+          Regulatory Dashboard
+        </Title>
+        <Tabs defaultActiveKey="r2" items={items} type="card" />
+      </div>
     </div>
   );
 }

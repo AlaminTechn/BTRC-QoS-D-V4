@@ -13,16 +13,12 @@
  *   onDistClick    {function}  (shapeName) => void
  *   onPopClick     {function}  (pop) => void
  *
- * Tile source (offline):
- *   VITE_TILE_URL  → Martin PMTiles server (default: OSM fallback)
- *
- * GeoJSON files served from /geodata/:
- *   /geodata/bangladesh_divisions_8.geojson  — NAME_1 property
- *   /geodata/bgd_districts.geojson           — shapeName property
- *
- * Name mappings (DB → GeoJSON):
- *   Divisions:  Chattagram→Chittagong, Rajshahi→Rajshani
- *   Districts:  9 mappings (see CLAUDE.md → Name Mappings)
+ * Map layers (bottom → top):
+ *   1. CartoDB No-Labels base tile (z-index default) — clean base
+ *   2. Division / district choropleth GeoJSON (overlayPane 400)
+ *   3. Division context outline GeoJSON (overlayPane 400)
+ *   4. GeoLabelLayer — centroid labels (labelPane 450)
+ *   5. PoP CircleMarker (popPane 500)
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -33,10 +29,14 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Spin } from 'antd';
+import { useTranslation } from '../../i18n';
 
 // ── Tile sources ──────────────────────────────────────────────────────────────
-const TILE_URL = import.meta.env.VITE_TILE_URL || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTR = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>';
+const CARTO_NL_URL  = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
+const CARTO_NL_ATTR = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors &copy; CARTO';
+const OSM_URL       = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const OSM_ATTR      = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>';
+const TILE_URL      = import.meta.env.VITE_TILE_URL || null;
 
 // ── Bangladesh initial view ───────────────────────────────────────────────────
 const BD_CENTER = [23.68, 90.35];
@@ -68,12 +68,57 @@ const getDistrictColor = (value, max) => {
 const popColor = (violations) =>
   violations >= 6 ? '#dc2626' : violations >= 3 ? '#f97316' : violations >= 1 ? '#eab308' : '#22c55e';
 
-// ── FitBounds helper (internal hook) ──────────────────────────────────────────
+// ── FitBounds helper ──────────────────────────────────────────────────────────
 const FitBounds = ({ bounds }) => {
   const map = useMap();
   useEffect(() => {
     if (bounds) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
   }, [bounds, map]);
+  return null;
+};
+
+// ── MapPaneSetup — creates custom Leaflet panes ───────────────────────────────
+const MapPaneSetup = () => {
+  const map = useMap();
+  useEffect(() => {
+    if (!map.getPane('labelPane')) map.createPane('labelPane').style.zIndex = 450;
+    if (!map.getPane('popPane'))   map.createPane('popPane').style.zIndex   = 500;
+  }, [map]);
+  return null;
+};
+
+// ── GeoLabelLayer — centroid labels via Leaflet divIcon in labelPane ──────────
+const GeoLabelLayer = ({ geoJSON, nameKey, getLabel }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!geoJSON) return;
+    // labelPane may not exist yet on very first mount; create if missing
+    if (!map.getPane('labelPane')) {
+      map.createPane('labelPane').style.zIndex = 450;
+    }
+    const markers = [];
+    geoJSON.features.forEach((f) => {
+      try {
+        const center = L.geoJSON(f).getBounds().getCenter();
+        const label  = getLabel ? getLabel(f) : f.properties[nameKey];
+        if (!label) return;
+        const m = L.marker(center, {
+          pane:        'labelPane',
+          icon:        L.divIcon({
+            className: 'map-geo-label-wrapper',
+            html:      `<span class="map-geo-label">${label}</span>`,
+            iconSize:  [0, 0],
+            iconAnchor:[0, 0],
+          }),
+          interactive: false,
+          keyboard:    false,
+        }).addTo(map);
+        markers.push(m);
+      } catch { /* skip malformed features */ }
+    });
+    return () => markers.forEach((m) => map.removeLayer(m));
+  }, [map, geoJSON]); // getLabel excluded — component is remounted via key on lang change
+
   return null;
 };
 
@@ -90,6 +135,8 @@ const DrillDownMap = ({
   onDistClick,
   onPopClick,
 }) => {
+  const { t, lang } = useTranslation();
+
   const [divGeoJSON,  setDivGeoJSON]  = useState(null);
   const [distGeoJSON, setDistGeoJSON] = useState(null);
   const [fitBounds,   setFitBounds]   = useState(null);
@@ -117,16 +164,16 @@ const DrillDownMap = ({
     Math.max(1, ...Object.values(districtData).map(d => d.total || 0)),
   [districtData]);
 
-  // ── Division layer style ─────────────────────────────────────────────────
+  // ── Division layer style — dim non-selected when a division is active ────
   const divStyle = (feature) => {
     const name = feature.properties.NAME_1;
     const d    = divisionData[name] || {};
     const isSelected = name === selectedDiv;
     return {
       fillColor:   getViolationColor(d.total || 0, maxDiv),
-      fillOpacity: isSelected ? 0.9 : 0.65,
-      color:       isSelected ? '#1e3a5f' : '#fff',
-      weight:      isSelected ? 3 : 1.2,
+      fillOpacity: isSelected ? 0.9 : (selectedDiv ? 0.2 : 0.65),
+      color:       isSelected ? '#1e3a5f' : (selectedDiv ? '#aaa' : '#fff'),
+      weight:      isSelected ? 3.5 : (selectedDiv ? 0.8 : 1.2),
     };
   };
 
@@ -140,15 +187,13 @@ const DrillDownMap = ({
     `, { sticky: true });
     layer.on('click', () => {
       onDivClick?.(name);
-      const bounds = layer.getBounds();
-      setFitBounds(bounds);
+      setFitBounds(layer.getBounds());
     });
     layer.on('mouseover', (e) => { e.target.setStyle({ weight: 2.5, fillOpacity: 0.85 }); });
     layer.on('mouseout',  (e) => { e.target.setStyle(divStyle(feature)); });
   };
 
-  // ── District layer (shown after drilling) ────────────────────────────────
-  // Filter: only show districts in selected division (by shapeName in districtData)
+  // ── District layer — filter by districts that have data ─────────────────
   const filteredDistGeoJSON = useMemo(() => {
     if (!distGeoJSON || level === 'national') return null;
     const allowed = new Set(Object.keys(districtData));
@@ -180,15 +225,23 @@ const DrillDownMap = ({
     `, { sticky: true });
     layer.on('click', () => {
       onDistClick?.(name);
-      const bounds = layer.getBounds();
-      setFitBounds(bounds);
+      setFitBounds(layer.getBounds());
     });
     layer.on('mouseover', (e) => { e.target.setStyle({ weight: 2.5, fillOpacity: 0.88 }); });
     layer.on('mouseout',  (e) => { e.target.setStyle(distStyle(feature)); });
   };
 
-  // ── Key props to force GeoJSON re-render when data changes ───────────────
-  const divKey  = JSON.stringify(divisionData)  + selectedDiv;
+  // ── Division context outline (division/district level) ───────────────────
+  const selectedDivOutlineGeoJSON = useMemo(() => {
+    if (!divGeoJSON || level === 'national' || !selectedDiv) return null;
+    return {
+      ...divGeoJSON,
+      features: divGeoJSON.features.filter(f => f.properties.NAME_1 === selectedDiv),
+    };
+  }, [divGeoJSON, selectedDiv, level]);
+
+  // ── Keys to force GeoJSON re-render when data/selection changes ──────────
+  const divKey  = JSON.stringify(divisionData) + selectedDiv;
   const distKey = JSON.stringify(districtData) + selectedDist;
 
   if (loading) {
@@ -206,24 +259,25 @@ const DrillDownMap = ({
         style={{ height: '100%', width: '100%' }}
         zoomControl={true}
       >
+        {/* 1. Pane setup (runs first, before GeoLabelLayer) */}
+        <MapPaneSetup />
+
+        {/* 2. Base tile layers */}
         <LayersControl position="topright">
-          {/* OSM always shown by default — shows roads, buildings, labels */}
-          <LayersControl.BaseLayer checked name="OpenStreetMap">
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution={TILE_ATTR} />
+          <LayersControl.BaseLayer checked name="Clean (No Labels)">
+            <TileLayer url={CARTO_NL_URL} attribution={CARTO_NL_ATTR} />
           </LayersControl.BaseLayer>
 
-          {/* Offline PMTiles via Martin — only available if bangladesh.pmtiles is downloaded */}
-          {import.meta.env.VITE_TILE_URL && (
+          <LayersControl.BaseLayer name="OpenStreetMap">
+            <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
+          </LayersControl.BaseLayer>
+
+          {TILE_URL && (
             <LayersControl.BaseLayer name="Offline (PMTiles)">
-              <TileLayer
-                url={TILE_URL}
-                attribution="&copy; OpenStreetMap (offline)"
-                maxZoom={18}
-              />
+              <TileLayer url={TILE_URL} attribution="&copy; OpenStreetMap (offline)" maxZoom={18} />
             </LayersControl.BaseLayer>
           )}
 
-          {/* ESRI Satellite */}
           <LayersControl.BaseLayer name="Satellite">
             <TileLayer
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -232,10 +286,9 @@ const DrillDownMap = ({
           </LayersControl.BaseLayer>
         </LayersControl>
 
-        {/* Fit to selected area */}
         {fitBounds && <FitBounds bounds={fitBounds} />}
 
-        {/* ── Division choropleth (national level) ── */}
+        {/* 3. Division choropleth (national level only) */}
         {divGeoJSON && level === 'national' && (
           <GeoJSON
             key={divKey}
@@ -246,7 +299,21 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* ── District choropleth (division/district level) ── */}
+        {/* 4. Division context outline (dashed border, no fill, at division/district level) */}
+        {selectedDivOutlineGeoJSON && (
+          <GeoJSON
+            key={`div-outline-${selectedDiv}`}
+            data={selectedDivOutlineGeoJSON}
+            style={() => ({
+              fillOpacity: 0,
+              color:       '#1e3a5f',
+              weight:      2,
+              dashArray:   '6,4',
+            })}
+          />
+        )}
+
+        {/* 5. District choropleth */}
         {filteredDistGeoJSON && level !== 'national' && (
           <GeoJSON
             key={distKey}
@@ -257,12 +324,31 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* ── POP / Node markers ── */}
+        {/* 6. Centroid labels in labelPane (450) — remount on lang change via key */}
+        {divGeoJSON && level === 'national' && (
+          <GeoLabelLayer
+            key={`div-labels-${lang}`}
+            geoJSON={divGeoJSON}
+            nameKey="NAME_1"
+            getLabel={(f) => t(`div.${f.properties.NAME_1}`)}
+          />
+        )}
+        {filteredDistGeoJSON && level !== 'national' && (
+          <GeoLabelLayer
+            key={`dist-labels-${lang}`}
+            geoJSON={filteredDistGeoJSON}
+            nameKey="shapeName"
+            getLabel={(f) => f.properties.shapeName}
+          />
+        )}
+
+        {/* 7. PoP markers in popPane (500) */}
         {popMarkers.map(pop => (
           <CircleMarker
             key={pop.id}
             center={[Number(pop.latitude), Number(pop.longitude)]}
             radius={pop.violations >= 6 ? 10 : pop.violations >= 3 ? 8 : pop.violations >= 1 ? 6 : 5}
+            pane="popPane"
             pathOptions={{
               fillColor:   popColor(pop.violations || 0),
               fillOpacity: 0.85,

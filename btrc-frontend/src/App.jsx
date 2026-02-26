@@ -1,7 +1,9 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spin } from 'antd';
+import { I18nProvider } from './i18n';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { FilterProvider } from './contexts/FilterContext';
 import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import ExecutiveDashboard    from './pages/ExecutiveDashboard';
@@ -21,7 +23,7 @@ const Guard = ({ children }) => {
 const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<LoginPage />} />
-    <Route path="/" element={<Guard><AppLayout /></Guard>}>
+    <Route path="/" element={<Guard><FilterProvider><AppLayout /></FilterProvider></Guard>}>
       <Route index element={<Navigate to="/executive" replace />} />
       <Route path="executive"   element={<ExecutiveDashboard />} />
       <Route path="regulatory"  element={<RegulatoryDashboard />} />
@@ -33,8 +35,10 @@ const AppRoutes = () => (
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </I18nProvider>
   );
 }

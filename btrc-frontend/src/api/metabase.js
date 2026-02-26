@@ -56,12 +56,24 @@ class MetabaseAPI {
   async getCurrentUser() {
     const { data: u } = await this.client.get('/api/user/current');
     return {
-      id:      u.id,
-      email:   u.email,
-      name:    u.common_name || `${u.first_name} ${u.last_name}`.trim(),
-      isAdmin: u.is_superuser,
+      id:       u.id,
+      email:    u.email,
+      name:     u.common_name || `${u.first_name} ${u.last_name}`.trim(),
+      isAdmin:  u.is_superuser,
       groupIds: u.group_ids || [],
+      // division/isp set on user attributes for Regional/ISP roles
+      division: u.login_attributes?.division || null,
+      isp:      u.login_attributes?.isp      || null,
     };
+  }
+
+  /**
+   * Fetch all Metabase permission groups.
+   * Returns [{ id, name }]
+   */
+  async getPermissionGroups() {
+    const { data } = await this.client.get('/api/permissions/group');
+    return (data || []).map(g => ({ id: g.id, name: g.name }));
   }
 
   /**

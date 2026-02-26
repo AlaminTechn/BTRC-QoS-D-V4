@@ -131,7 +131,7 @@ FROM (
     dict(
         key="REG_R1_ISP_SLA_TABLE",
         name="[R1] ISP SLA Status Table",
-        description="Per-ISP violation count, score, and status",
+        description="Per-ISP violation count, score, and status. Filters: {{start_date}} {{end_date}}",
         collection="regulatory", display="table",
         sql="""
 SELECT
@@ -150,13 +150,18 @@ SELECT
 FROM isps i
 JOIN isp_license_categories lc ON i.license_category_id = lc.id
 LEFT JOIN pops              p   ON p.isp_id  = i.id
-LEFT JOIN sla_violations    v   ON v.isp_id  = i.id
+LEFT JOIN (
+    SELECT * FROM sla_violations
+    WHERE 1=1
+      [[ AND detection_time >= CAST({{start_date}} AS timestamptz) ]]
+      [[ AND detection_time <= CAST({{end_date}} AS timestamptz) ]]
+) v ON v.isp_id = i.id
 LEFT JOIN compliance_scores c   ON c.isp_id  = i.id
 WHERE i.is_active = true
 GROUP BY i.name_en, lc.name_en
 ORDER BY violations DESC, i.name_en
 """,
-        template_tags={},
+        template_tags=make_ttags("start_date", "end_date"),
     ),
 
     # ── R2 Regional Drill-Down ───────────────────────────────────────────────
@@ -340,38 +345,52 @@ ORDER BY violations DESC
     dict(
         key="REG_R3_PENDING",
         name="[R3] Pending Violations",
-        description="Count of active/pending violations (DETECTED or ACKNOWLEDGED)",
+        description="Count of active/pending violations (DETECTED or ACKNOWLEDGED). Filters: {{start_date}} {{end_date}}",
         collection="regulatory", display="scalar",
         sql="""
 SELECT COUNT(*) AS pending_violations
 FROM sla_violations
 WHERE status IN ('DETECTED', 'ACKNOWLEDGED')
+  [[ AND detection_time >= CAST({{start_date}} AS timestamptz) ]]
+  [[ AND detection_time <= CAST({{end_date}} AS timestamptz) ]]
 """,
-        template_tags={},
+        template_tags=make_ttags("start_date", "end_date"),
     ),
 
     dict(
         key="REG_R3_DISPUTED",
         name="[R3] Disputed Violations",
-        description="Count of DISPUTED violations",
+        description="Count of DISPUTED violations. Filters: {{start_date}} {{end_date}}",
         collection="regulatory", display="scalar",
-        sql="SELECT COUNT(*) AS disputed_violations FROM sla_violations WHERE status = 'DISPUTED'",
-        template_tags={},
+        sql="""
+SELECT COUNT(*) AS disputed_violations
+FROM sla_violations
+WHERE status = 'DISPUTED'
+  [[ AND detection_time >= CAST({{start_date}} AS timestamptz) ]]
+  [[ AND detection_time <= CAST({{end_date}} AS timestamptz) ]]
+""",
+        template_tags=make_ttags("start_date", "end_date"),
     ),
 
     dict(
         key="REG_R3_RESOLVED",
         name="[R3] Resolved Violations",
-        description="Count of RESOLVED violations",
+        description="Count of RESOLVED violations. Filters: {{start_date}} {{end_date}}",
         collection="regulatory", display="scalar",
-        sql="SELECT COUNT(*) AS resolved_violations FROM sla_violations WHERE status = 'RESOLVED'",
-        template_tags={},
+        sql="""
+SELECT COUNT(*) AS resolved_violations
+FROM sla_violations
+WHERE status = 'RESOLVED'
+  [[ AND detection_time >= CAST({{start_date}} AS timestamptz) ]]
+  [[ AND detection_time <= CAST({{end_date}} AS timestamptz) ]]
+""",
+        template_tags=make_ttags("start_date", "end_date"),
     ),
 
     dict(
         key="REG_R3_DETAIL",
         name="[R3] Violation Detail Table",
-        description="Full violation table. Filters: {{division}} {{district}} {{isp}} {{severity}} {{status}}",
+        description="Full violation table. Filters: {{division}} {{district}} {{isp}} {{severity}} {{status}} {{start_date}} {{end_date}}",
         collection="regulatory", display="table",
         sql="""
 SELECT
@@ -399,9 +418,11 @@ WHERE 1=1
   [[ AND i.name_en   = {{isp}} ]]
   [[ AND v.severity  = {{severity}} ]]
   [[ AND v.status    = {{status}} ]]
+  [[ AND v.detection_time >= CAST({{start_date}} AS timestamptz) ]]
+  [[ AND v.detection_time <= CAST({{end_date}} AS timestamptz) ]]
 ORDER BY v.detection_time DESC
 """,
-        template_tags=make_ttags("division", "district", "isp", "severity", "status"),
+        template_tags=make_ttags("division", "district", "isp", "severity", "status", "start_date", "end_date"),
     ),
 
     dict(
@@ -427,7 +448,7 @@ ORDER BY day
     dict(
         key="REG_R3_GEO",
         name="[R3] Violations by Geography",
-        description="Division/district violation breakdown. Filter: {{division}}",
+        description="Division/district violation breakdown. Filters: {{division}} {{start_date}} {{end_date}}",
         collection="regulatory", display="table",
         sql="""
 SELECT
@@ -444,10 +465,12 @@ LEFT JOIN geo_districts  di  ON p.district_id  = di.id
 LEFT JOIN geo_divisions  d   ON di.division_id = d.id
 WHERE 1=1
   [[ AND d.name_en = {{division}} ]]
+  [[ AND v.detection_time >= CAST({{start_date}} AS timestamptz) ]]
+  [[ AND v.detection_time <= CAST({{end_date}} AS timestamptz) ]]
 GROUP BY d.name_en, di.name_en
 ORDER BY total DESC
 """,
-        template_tags=make_ttags("division"),
+        template_tags=make_ttags("division", "start_date", "end_date"),
     ),
 ]
 
@@ -897,23 +920,32 @@ class MetabaseSetup:
 
         return dash_ids
 
-    # ── Permission Groups ────────────────────────────────────────────────────
+    # ── Permission Groups + Test Users ──────────────────────────────────────
     def setup_permission_groups(self, coll_id):
-        """Create BTRC permission groups and grant collection access."""
+        """Create BTRC permission groups matching frontend ROLE_MAP and grant collection access.
+
+        Groups created (names must match AuthContext ROLE_MAP exactly):
+          Regulatory Officers  → role: regulatory_officer
+          Regional Officers    → role: regional_officer
+          ISP Users            → role: isp_user
+        """
         existing = self._get("/api/permissions/group")
         existing_names = {g["name"]: g["id"] for g in existing}
 
-        groups = {}
-        for name in ["BTRC Regulatory Officers", "BTRC Executive Viewers"]:
-            if name in existing_names:
-                print(f"  ↩️  Group exists: {name}")
-                groups[name] = existing_names[name]
-                continue
-            data = self._post("/api/permissions/group", {"name": name})
-            groups[name] = data["id"]
-            print(f"  ✅ Created group: {name} id={data['id']}")
+        # These group names must match ROLE_MAP keys in AuthContext.jsx
+        GROUP_DEFS = ["Regulatory Officers", "Regional Officers", "ISP Users"]
 
-        # Grant view access to collection for both groups
+        groups = {}
+        for name in GROUP_DEFS:
+            if name in existing_names:
+                print(f"  ↩️  Group exists: {name} id={existing_names[name]}")
+                groups[name] = existing_names[name]
+            else:
+                data = self._post("/api/permissions/group", {"name": name})
+                groups[name] = data["id"]
+                print(f"  ✅ Created group: {name} id={data['id']}")
+
+        # Grant read access to BTRC QoS collection for all groups
         try:
             graph = self._get("/api/collection/graph")
             groups_graph = graph.get("groups", {})
@@ -922,12 +954,137 @@ class MetabaseSetup:
                 if key not in groups_graph:
                     groups_graph[key] = {}
                 groups_graph[key][str(coll_id)] = "read"
-            self._put("/api/collection/graph", {"groups": groups_graph, "revision": graph.get("revision", 0)})
-            print("  ✅ Collection permissions updated")
+            self._put("/api/collection/graph", {
+                "groups":   groups_graph,
+                "revision": graph.get("revision", 0),
+            })
+            print("  ✅ Collection permissions updated for all groups")
         except Exception as e:
             print(f"  ⚠️  Could not update collection permissions: {e}")
 
         return groups
+
+    def create_test_users(self, groups):
+        """Create test users for each role. Idempotent — skips existing emails."""
+        # Metabase API: GET /api/user returns { data: [...], total: N }
+        try:
+            resp = self._get("/api/user")
+            existing_emails = {u["email"] for u in (resp.get("data") or resp)}
+        except Exception:
+            existing_emails = set()
+
+        test_users = [
+            {
+                "first_name":        "Regulatory",
+                "last_name":         "Officer",
+                "email":             "regulatory@btrc.gov.bd",
+                "password":          "Btrc@2026!",
+                "group_name":        "Regulatory Officers",
+                "login_attributes":  {},
+            },
+            {
+                "first_name":        "Regional",
+                "last_name":         "Officer Dhaka",
+                "email":             "regional.dhaka@btrc.gov.bd",
+                "password":          "Btrc@2026!",
+                "group_name":        "Regional Officers",
+                "login_attributes":  {"division": "Dhaka"},
+            },
+            {
+                "first_name":        "ISP",
+                "last_name":         "User",
+                "email":             "isp.user@example.com",
+                "password":          "Btrc@2026!",
+                "group_name":        "ISP Users",
+                "login_attributes":  {"isp": "GrameenPhone BD"},
+            },
+        ]
+
+        for u in test_users:
+            if u["email"] in existing_emails:
+                print(f"  ↩️  User exists: {u['email']}")
+                continue
+            group_id = groups.get(u["group_name"])
+            try:
+                data = self._post("/api/user", {
+                    "first_name": u["first_name"],
+                    "last_name":  u["last_name"],
+                    "email":      u["email"],
+                    "password":   u["password"],
+                })
+                user_id = data["id"]
+
+                # Add to permission group
+                if group_id:
+                    try:
+                        self._post("/api/permissions/membership", {
+                            "group_id": group_id,
+                            "user_id":  user_id,
+                        })
+                    except Exception as e:
+                        print(f"    ⚠️  Could not add to group: {e}")
+
+                # Set login_attributes (for row-level division/ISP filtering)
+                if u.get("login_attributes"):
+                    try:
+                        self._put(f"/api/user/{user_id}", {
+                            "login_attributes": u["login_attributes"],
+                        })
+                    except Exception as e:
+                        print(f"    ⚠️  Could not set login_attributes: {e}")
+
+                print(f"  ✅ Created user: {u['email']} → group: {u['group_name']}")
+            except Exception as e:
+                print(f"  ⚠️  Could not create user {u['email']}: {e}")
+
+    def update_existing_cards(self, db_id):
+        """Update SQL + template-tags for cards that already exist.
+
+        Re-running setup creates cards only if they don't exist. This method
+        explicitly patches existing cards when the SQL definition changes
+        (e.g., to add start_date/end_date template tags).
+        """
+        existing = self._existing_cards_by_name()
+
+        for card in ALL_CARDS:
+            card_id = existing.get(card["name"])
+            if card_id is None:
+                continue  # Not yet created — will be handled by create_cards
+
+            ttags      = card.get("template_tags", {})
+            new_sql    = card["sql"].strip()
+            parameters = [
+                {
+                    "id":     t["id"],
+                    "type":   "string/=",
+                    "target": ["variable", ["template-tag", k]],
+                    "name":   t["display-name"],
+                    "slug":   k,
+                }
+                for k, t in ttags.items()
+            ]
+
+            try:
+                current     = self._get(f"/api/card/{card_id}")
+                current_sql = current.get("dataset_query", {}).get("native", {}).get("query", "").strip()
+                if current_sql == new_sql:
+                    print(f"  ✓  Card unchanged: [{card['key']}]")
+                    continue
+
+                self._put(f"/api/card/{card_id}", {
+                    "dataset_query": {
+                        "type":     "native",
+                        "database": db_id,
+                        "native": {
+                            "query":         new_sql,
+                            "template-tags": ttags,
+                        },
+                    },
+                    "parameters": parameters,
+                })
+                print(f"  🔄 Updated card SQL: [{card['key']}] id={card_id}")
+            except Exception as e:
+                print(f"  ⚠️  Could not update [{card['key']}]: {e}")
 
     # ── Query Caching ────────────────────────────────────────────────────────
     def enable_caching(self):
@@ -987,11 +1144,17 @@ class MetabaseSetup:
         print("\n▶ Creating cards")
         card_ids = self.create_cards(db_id, coll_id)
 
+        print("\n▶ Updating existing card SQL (adds time-filter template tags if changed)")
+        self.update_existing_cards(db_id)
+
         print("\n▶ Creating dashboards")
         self.create_dashboards(card_ids, coll_id)
 
         print("\n▶ Permission groups")
-        self.setup_permission_groups(coll_id)
+        groups = self.setup_permission_groups(coll_id)
+
+        print("\n▶ Test users")
+        self.create_test_users(groups)
 
         print("\n▶ Query caching")
         self.enable_caching()

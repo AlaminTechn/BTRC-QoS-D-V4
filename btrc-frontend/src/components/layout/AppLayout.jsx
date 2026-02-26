@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Button, Avatar, Dropdown, Space } from 'antd';
+import { Layout, Menu, Button, Avatar, Dropdown, Space, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   BarChartOutlined, GlobalOutlined, DatabaseOutlined,
@@ -7,6 +7,7 @@ import {
   LogoutOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 
 const { Sider, Header, Content } = Layout;
 
@@ -18,7 +19,8 @@ const NAV = [
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, logout, roleLabel, roleColor } = useAuth();
+  const { t, toggleLang } = useTranslation();
   const navigate  = useNavigate();
   const location  = useLocation();
 
@@ -72,12 +74,32 @@ export default function AppLayout() {
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={() => setCollapsed(c => !c)}
           />
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <Space style={{ cursor: 'pointer' }}>
-              <Avatar icon={<UserOutlined />} size="small" style={{ background: '#1890ff' }} />
-              {!collapsed && <span style={{ fontSize: 13 }}>{user?.name}</span>}
-            </Space>
-          </Dropdown>
+          <Space>
+            {/* Language toggle button */}
+            <Button
+              size="small"
+              onClick={toggleLang}
+              style={{ fontSize: 12, fontWeight: 600, minWidth: 36 }}
+              title="Toggle language / ভাষা পরিবর্তন"
+            >
+              {t('lang.toggle')}
+            </Button>
+
+            <Dropdown menu={userMenu} placement="bottomRight">
+              <Space style={{ cursor: 'pointer' }}>
+                <Avatar icon={<UserOutlined />} size="small" style={{ background: roleColor || '#1890ff' }} />
+                <span style={{ fontSize: 13 }}>{user?.name}</span>
+                {roleLabel && (
+                  <Tag
+                    color={roleColor}
+                    style={{ fontSize: 10, padding: '0 5px', lineHeight: '18px', margin: 0 }}
+                  >
+                    {roleLabel}
+                  </Tag>
+                )}
+              </Space>
+            </Dropdown>
+          </Space>
         </Header>
 
         <Content style={{ background: '#f0f2f5', overflow: 'auto' }}>

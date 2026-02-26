@@ -28,16 +28,17 @@ import {
 } from '../config/cards';
 
 // ── Name mappings (DB name_en → GeoJSON property) ──────────────────────────
-const DIV_DB_TO_GEO  = { Chattagram: 'Chittagong', Rajshahi: 'Rajshani' };
+// Division DB names match GeoJSON NAME_1 exactly — no mapping needed.
+const DIV_DB_TO_GEO  = {};
 const DIST_DB_TO_GEO = {
   Bogura: 'Bogra', Brahmanbaria: 'Brahamanbaria', Chapainawabganj: 'Nawabganj',
   Chattogram: 'Chittagong', Coxsbazar: "Cox's Bazar", Jashore: 'Jessore',
   Jhalakathi: 'Jhalokati', Moulvibazar: 'Maulvibazar', Netrokona: 'Netrakona',
 };
 
-export const toGeoDiv  = (n) => DIV_DB_TO_GEO[n]  || n;
+export const toGeoDiv  = (n) => n;
 export const toGeoDist = (n) => DIST_DB_TO_GEO[n] || n;
-export const toDbDiv   = (n) => Object.entries(DIV_DB_TO_GEO).find(([, v]) => v === n)?.[0]  || n;
+export const toDbDiv   = (n) => n;
 export const toDbDist  = (n) => Object.entries(DIST_DB_TO_GEO).find(([, v]) => v === n)?.[0] || n;
 
 // ── Parse Metabase result rows ──────────────────────────────────────────────
