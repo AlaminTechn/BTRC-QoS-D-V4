@@ -27,7 +27,6 @@ import {
   MapContainer, TileLayer, GeoJSON, CircleMarker,
   Tooltip, useMap, LayersControl,
 } from 'react-leaflet';
-import { createLayerComponent } from '@react-leaflet/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Spin, Tooltip as AntTooltip } from 'antd';
@@ -35,15 +34,19 @@ import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant
 import { useTranslation } from '../../i18n';
 import { leafletLayer as protomapsLeafletLayer } from 'protomaps-leaflet';
 
-// ── ProtomapsLayer — React-Leaflet BaseLayer-compatible Protomaps wrapper ─────
-// Uses createLayerComponent to expose the Leaflet layer instance through
-// react-leaflet's context so LayersControl can properly add/remove it.
-const ProtomapsLayer = createLayerComponent(
-  ({ url, theme = 'light' }, ctx) => ({
-    instance: protomapsLeafletLayer({ url, theme }),
-    context:  ctx,
-  }),
-);
+// ── ProtomapsLayer — renders PMTiles via useMap() (no @react-leaflet/core needed) ──
+// Directly adds/removes the Leaflet layer on mount/unmount.
+// Use as: {pmtilesVisible && <ProtomapsLayer url="..." />}
+const ProtomapsLayer = ({ url, theme = 'light' }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !url) return;
+    const layer = protomapsLeafletLayer({ url, theme });
+    map.addLayer(layer);
+    return () => { map.removeLayer(layer); };
+  }, [map, url, theme]);
+  return null;
+};
 
 // ── Tile sources ──────────────────────────────────────────────────────────────
 const CARTO_NL_URL  = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
@@ -197,8 +200,9 @@ const DrillDownMap = ({
   const [distGeoJSON, setDistGeoJSON] = useState(null);
   const [fitBounds,   setFitBounds]   = useState(null);
   const [loading,     setLoading]     = useState(true);
-  const [maximized,   setMaximized]   = useState(false);
-  const [resizeKey,   setResizeKey]   = useState(0);
+  const [maximized,      setMaximized]      = useState(false);
+  const [resizeKey,      setResizeKey]      = useState(0);
+  const [pmtilesVisible, setPmtilesVisible] = useState(false);
   const divLayerRef  = useRef(null);
   const distLayerRef = useRef(null);
 
@@ -358,10 +362,6 @@ const DrillDownMap = ({
             <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
           </LayersControl.BaseLayer>
 
-          <LayersControl.BaseLayer name="Offline (PMTiles)">
-            <ProtomapsLayer url="/pmtiles/bangladesh.pmtiles" theme="light" />
-          </LayersControl.BaseLayer>
-
           <LayersControl.BaseLayer name="Satellite">
             <TileLayer
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -408,7 +408,7 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* 5b. Bangladesh mask — fully opaque; holes reveal BD, completely hides surrounding area */}
+        {/* 5b. Bangladesh mask — inverted polygon; evenodd fill rule cuts holes revealing BD */}
         {bangMaskData && (
           <GeoJSON
             key="bangladesh-mask"
@@ -416,6 +416,7 @@ const DrillDownMap = ({
             style={() => ({
               fillColor:   '#f0f2f5',
               fillOpacity: 1,
+              fillRule:    'evenodd',
               stroke:      false,
               weight:      0,
             })}
@@ -442,7 +443,12 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* 7. PoP markers in popPane (500) */}
+        {/* 7. Offline PMTiles layer — rendered when toggled on */}
+        {pmtilesVisible && (
+          <ProtomapsLayer url="/pmtiles/bangladesh.pmtiles" theme="light" />
+        )}
+
+        {/* 8. PoP markers in popPane (500) */}
         {popMarkers.map(pop => (
           <CircleMarker
             key={pop.id}
@@ -513,6 +519,27 @@ const DrillDownMap = ({
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             <ReloadOutlined />
+          </button>
+        </AntTooltip>
+
+        {/* divider */}
+        <div style={{ height: 1, background: 'rgba(0,0,0,0.2)', margin: '0 4px' }} />
+
+        <AntTooltip title={pmtilesVisible ? 'Disable offline tiles' : 'Enable offline PMTiles'} placement="left">
+          <button
+            onClick={() => setPmtilesVisible(v => !v)}
+            style={{
+              width: 30, height: 30, border: 'none', cursor: 'pointer',
+              background: pmtilesVisible ? '#e6f4ff' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700,
+              color: pmtilesVisible ? '#1677ff' : '#555',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = pmtilesVisible ? '#bae0ff' : '#f4f4f4'}
+            onMouseLeave={e => e.currentTarget.style.background = pmtilesVisible ? '#e6f4ff' : 'transparent'}
+          >
+            PM
           </button>
         </AntTooltip>
       </div>
