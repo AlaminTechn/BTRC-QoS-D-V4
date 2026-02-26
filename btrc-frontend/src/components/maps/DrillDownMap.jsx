@@ -191,7 +191,7 @@ const DrillDownMap = ({
   onDistClick,
   onPopClick,
 }) => {
-  const { t, lang } = useTranslation();
+  const { lang } = useTranslation();
 
   const [divGeoJSON,  setDivGeoJSON]  = useState(null);
   const [distGeoJSON, setDistGeoJSON] = useState(null);
@@ -422,21 +422,23 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* 6. Centroid labels in labelPane (450) — remount on lang change via key */}
+        {/* 6. Centroid labels — read name_en / name_bn from enriched GeoJSON */}
         {divGeoJSON && level === 'national' && (
           <GeoLabelLayer
             key={`div-labels-${lang}`}
             geoJSON={divGeoJSON}
-            nameKey="NAME_1"
-            getLabel={(f) => t(`div.${f.properties.NAME_1}`)}
+            getLabel={(f) => lang === 'bn'
+              ? (f.properties.name_bn || f.properties.NAME_1)
+              : (f.properties.name_en || f.properties.NAME_1)}
           />
         )}
         {filteredDistGeoJSON && level !== 'national' && (
           <GeoLabelLayer
             key={`dist-labels-${lang}`}
             geoJSON={filteredDistGeoJSON}
-            nameKey="shapeName"
-            getLabel={(f) => f.properties.shapeName}
+            getLabel={(f) => lang === 'bn'
+              ? (f.properties.name_bn || f.properties.shapeName)
+              : (f.properties.name_en || f.properties.shapeName)}
           />
         )}
 

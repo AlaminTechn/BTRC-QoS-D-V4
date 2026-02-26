@@ -1,15 +1,6 @@
 {
   "lang.toggle": "বাং",
 
-  "div.Barisal":    "Barisal",
-  "div.Chattagram": "Chattagram",
-  "div.Dhaka":      "Dhaka",
-  "div.Khulna":     "Khulna",
-  "div.Mymensingh": "Mymensingh",
-  "div.Rajshahi":   "Rajshahi",
-  "div.Rangpur":    "Rangpur",
-  "div.Sylhet":     "Sylhet",
-
   "map.violations": "Violations",
   "map.critical":   "Critical",
   "map.noData":     "No data"

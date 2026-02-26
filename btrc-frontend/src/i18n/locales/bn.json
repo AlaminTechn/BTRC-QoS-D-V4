@@ -1,15 +1,6 @@
 {
   "lang.toggle": "EN",
 
-  "div.Barisal":    "বরিশাল",
-  "div.Chattagram": "চট্টগ্রাম",
-  "div.Dhaka":      "ঢাকা",
-  "div.Khulna":     "খুলনা",
-  "div.Mymensingh": "ময়মনসিংহ",
-  "div.Rajshahi":   "রাজশাহী",
-  "div.Rangpur":    "রংপুর",
-  "div.Sylhet":     "সিলেট",
-
   "map.violations": "লঙ্ঘন",
   "map.critical":   "সংকটজনক",
   "map.noData":     "তথ্য নেই"
