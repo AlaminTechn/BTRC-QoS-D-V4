@@ -1,0 +1,16 @@
+# Martin PMTiles tile server config
+# Docs: https://maplibre.org/martin/
+
+listen_addresses: "0.0.0.0:3000"
+
+# Scan /tiles directory for all .pmtiles/.mbtiles files.
+# If the directory is empty, martin starts with no sources (won't crash).
+# Once bangladesh.pmtiles is placed in tiles/, it's served as:
+#   /tiles/bangladesh/{z}/{x}/{y}
+pmtiles:
+  paths:
+    - /tiles
+
+# Keep-alive for vector tile connections
+keep_alive: 75
+worker_processes: 2

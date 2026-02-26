@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+btrc-frontend/node_modules/
+
+# Build output
+btrc-frontend/dist/
+btrc-frontend/.vite/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tiles (large binary files)
+tiles/*.pmtiles
+tiles/*.mbtiles
+
+# Docker volumes / data
+postgres-data/
+metabase-data/
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+/dummy_data/
