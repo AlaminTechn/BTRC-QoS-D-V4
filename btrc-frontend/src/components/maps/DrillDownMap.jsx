@@ -240,13 +240,15 @@ const DrillDownMap = ({
   [districtData]);
 
   // ── Division layer style — dim non-selected when a division is active ────
+  // When PM offline tiles are active, use lower opacity so base tiles show through
+  const pm = activeTile === 'pmtiles';
   const divStyle = (feature) => {
     const name = feature.properties.NAME_1;
     const d    = divisionData[name] || {};
     const isSelected = name === selectedDiv;
     return {
       fillColor:   getViolationColor(d.total || 0, maxDiv),
-      fillOpacity: isSelected ? 0.9 : (selectedDiv ? 0.2 : 0.65),
+      fillOpacity: isSelected ? (pm ? 0.55 : 0.9) : (selectedDiv ? (pm ? 0.12 : 0.2) : (pm ? 0.4 : 0.65)),
       color:       isSelected ? '#1e3a5f' : (selectedDiv ? '#aaa' : '#fff'),
       weight:      isSelected ? 3.5 : (selectedDiv ? 0.8 : 1.2),
     };
@@ -284,7 +286,7 @@ const DrillDownMap = ({
     const isSelected = name === selectedDist;
     return {
       fillColor:   getDistrictColor(d.total || 0, maxDist),
-      fillOpacity: isSelected ? 0.9 : 0.65,
+      fillOpacity: isSelected ? (pm ? 0.55 : 0.9) : (pm ? 0.4 : 0.65),
       color:       isSelected ? '#7c2d12' : '#fff',
       weight:      isSelected ? 3 : 1,
     };
@@ -318,9 +320,9 @@ const DrillDownMap = ({
     };
   }, [divGeoJSON, selectedDiv, level]);
 
-  // ── Keys to force GeoJSON re-render when data/selection changes ──────────
-  const divKey  = JSON.stringify(divisionData) + selectedDiv;
-  const distKey = JSON.stringify(districtData) + selectedDist;
+  // ── Keys to force GeoJSON re-render when data/selection/tile changes ─────
+  const divKey  = JSON.stringify(divisionData) + selectedDiv  + activeTile;
+  const distKey = JSON.stringify(districtData) + selectedDist + activeTile;
 
   if (loading) {
     return (
