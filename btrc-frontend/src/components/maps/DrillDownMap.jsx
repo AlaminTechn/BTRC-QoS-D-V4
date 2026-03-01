@@ -50,22 +50,25 @@ const SEV_COLORS = {
   CRITICAL: '#dc2626', HIGH: '#f97316', MEDIUM: '#eab308', LOW: '#22c55e',
 };
 
+// Three-tier RAG (Red / Amber / Green) colour scale for choropleth
+// 0 violations → gray (no issue)
+// low ratio   → green (compliant)
+// mid ratio   → yellow/amber (at-risk)
+// high ratio  → red (non-compliant)
 const getViolationColor = (value, max) => {
-  if (!max || value === 0) return '#e5e7eb';
+  if (!max || value === 0) return '#e5e7eb'; // gray — no violations
   const ratio = value / max;
-  if (ratio > 0.75) return '#b91c1c';
-  if (ratio > 0.50) return '#ef4444';
-  if (ratio > 0.25) return '#f87171';
-  return '#fca5a5';
+  if (ratio > 0.60) return '#dc2626';        // red   — high
+  if (ratio > 0.30) return '#eab308';        // yellow — moderate
+  return '#22c55e';                           // green — low
 };
 
 const getDistrictColor = (value, max) => {
-  if (!max || value === 0) return '#fff7ed';
+  if (!max || value === 0) return '#e5e7eb'; // gray — no violations
   const ratio = value / max;
-  if (ratio > 0.75) return '#9a3412';
-  if (ratio > 0.50) return '#ea580c';
-  if (ratio > 0.25) return '#fb923c';
-  return '#fed7aa';
+  if (ratio > 0.60) return '#dc2626';        // red
+  if (ratio > 0.30) return '#eab308';        // yellow
+  return '#22c55e';                           // green
 };
 
 const popColor = (violations) =>
@@ -570,11 +573,10 @@ const DrillDownMap = ({
       }}>
         <div style={{ fontWeight: 700, marginBottom: 5 }}>Violations</div>
         {[
-          { color: '#e5e7eb', label: '0' },
-          { color: '#fca5a5', label: 'Low' },
-          { color: '#f87171', label: 'Medium' },
-          { color: '#ef4444', label: 'High' },
-          { color: '#b91c1c', label: 'Critical' },
+          { color: '#e5e7eb', label: 'None (0)' },
+          { color: '#22c55e', label: 'Low' },
+          { color: '#eab308', label: 'Moderate' },
+          { color: '#dc2626', label: 'High' },
         ].map(({ color, label }) => (
           <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
             <div style={{ width: 14, height: 10, background: color, border: '1px solid #ccc' }} />

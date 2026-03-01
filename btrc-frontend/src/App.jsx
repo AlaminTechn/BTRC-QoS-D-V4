@@ -8,7 +8,7 @@ import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import ExecutiveDashboard    from './pages/ExecutiveDashboard';
 import RegulatoryDashboard   from './pages/RegulatoryDashboard';
-import OperationalDashboard  from './pages/OperationalDashboard';
+// import OperationalDashboard  from './pages/OperationalDashboard'; // Phase 2
 
 const Guard = ({ children }) => {
   const { user, loading } = useAuth();
@@ -24,10 +24,10 @@ const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/" element={<Guard><FilterProvider><AppLayout /></FilterProvider></Guard>}>
-      <Route index element={<Navigate to="/executive" replace />} />
+      <Route index element={<Navigate to="/regulatory" replace />} />
       <Route path="executive"   element={<ExecutiveDashboard />} />
       <Route path="regulatory"  element={<RegulatoryDashboard />} />
-      <Route path="operational" element={<OperationalDashboard />} />
+      {/* <Route path="operational" element={<OperationalDashboard />} /> */}{/* Phase 2 */}
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>

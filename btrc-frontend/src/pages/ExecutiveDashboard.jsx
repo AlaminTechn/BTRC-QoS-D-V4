@@ -9,12 +9,12 @@
  * E3 Compliance Overview     — Violation type/severity/trend charts + penalty KPI
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   Tabs, Card, Row, Col, Statistic, Table, Typography,
-  Spin, Alert, Tag, Badge, Space, Progress,
+  Spin, Alert, Tag, Badge, Space, Progress, Button,
 } from 'antd';
-import { GlobalOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { GlobalOutlined, WarningOutlined, CheckCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import DrillDownMap from '../components/maps/DrillDownMap';
 import { useMetabaseCard } from '../hooks/useMetabaseCard';
@@ -23,6 +23,7 @@ import {
   EXEC_E1_NATIONAL_SCORE, EXEC_E1_ISP_PERFORMANCE, EXEC_E1_ISP_BY_CATEGORY,
   EXEC_E2_DIV_SUMMARY,
   EXEC_E3_VIOLATION_TYPE, EXEC_E3_VIOLATION_SEV, EXEC_E3_TREND, EXEC_E3_PENALTY,
+  REG_R2_ISP_BY_AREA,
 } from '../config/cards';
 
 const { Title, Text } = Typography;
@@ -140,8 +141,20 @@ function E1Tab() {
 }
 
 // ── E2 Geographic Intelligence ────────────────────────────────────────────
+// Spec: National → Division only (NO district drill-down for Executive POC).
+// Clicking a division highlights it on the map and loads ISP performance data
+// for that division in the right panel. Click again or "← All" to deselect.
 function E2Tab() {
+  const [selectedDiv, setSelectedDiv] = useState(null);
+
   const { rows: divRows, loading } = useMetabaseCard(EXEC_E2_DIV_SUMMARY);
+
+  // ISP table for the selected division — only fetches when a division is selected
+  const { rows: ispRows, loading: ispLoading } = useMetabaseCard(
+    selectedDiv ? REG_R2_ISP_BY_AREA : null,
+    selectedDiv ? { division: selectedDiv } : {},
+    [selectedDiv],
+  );
 
   const divisionData = useMemo(() => {
     const d = {};
@@ -158,51 +171,157 @@ function E2Tab() {
     return d;
   }, [divRows]);
 
+  // Toggle: click same division again → deselect
+  const handleDivClick = useCallback((geoName) => {
+    setSelectedDiv(prev => prev === geoName ? null : geoName);
+  }, []);
+
   const rankOpt = useMemo(() => ({
     tooltip: { trigger: 'axis' },
-    grid: { left: 110, right: 20, top: 10, bottom: 10 },
+    legend: { data: ['Critical','High','Medium','Low'], top: 0, textStyle: { fontSize: 10 } },
+    grid: { left: 100, right: 16, top: 28, bottom: 8 },
     xAxis: { type: 'value' },
-    yAxis: { type: 'category', data: divRows.map(r => toGeoDiv(r.division || '')).reverse() },
+    yAxis: { type: 'category', data: [...divRows].reverse().map(r => toGeoDiv(r.division || '')) },
     series: [
-      { name: 'Critical', type: 'bar', stack: 's', data: divRows.map(r => Number(r.critical || 0)).reverse(), itemStyle: { color: '#dc2626' } },
-      { name: 'High',     type: 'bar', stack: 's', data: divRows.map(r => Number(r.high     || 0)).reverse(), itemStyle: { color: '#f97316' } },
-      { name: 'Medium',   type: 'bar', stack: 's', data: divRows.map(r => Number(r.medium   || 0)).reverse(), itemStyle: { color: '#eab308' } },
-      { name: 'Low',      type: 'bar', stack: 's', data: divRows.map(r => Number(r.low      || 0)).reverse(), itemStyle: { color: '#22c55e' } },
+      { name: 'Critical', type: 'bar', stack: 's', data: [...divRows].reverse().map(r => Number(r.critical || 0)), itemStyle: { color: '#dc2626' } },
+      { name: 'High',     type: 'bar', stack: 's', data: [...divRows].reverse().map(r => Number(r.high     || 0)), itemStyle: { color: '#f97316' } },
+      { name: 'Medium',   type: 'bar', stack: 's', data: [...divRows].reverse().map(r => Number(r.medium   || 0)), itemStyle: { color: '#eab308' } },
+      { name: 'Low',      type: 'bar', stack: 's', data: [...divRows].reverse().map(r => Number(r.low      || 0)), itemStyle: { color: '#22c55e' } },
     ],
   }), [divRows]);
 
+  const selStats = selectedDiv ? (divisionData[selectedDiv] || {}) : null;
+
+  const ispCols = [
+    { title: 'ISP',        dataIndex: 'isp',              ellipsis: true },
+    { title: 'PoPs',       dataIndex: 'pop_count',        width: 52 },
+    { title: 'DL Mbps',   dataIndex: 'avg_download_mbps', width: 75,
+      render: v => v != null ? Number(v).toFixed(1) : '—' },
+    { title: 'Violations', dataIndex: 'violations',       width: 80,
+      render: v => <Badge count={Number(v || 0)} color={Number(v) === 0 ? 'green' : Number(v) < 3 ? 'orange' : 'red'} showZero /> },
+  ];
+
   return (
-    <Row gutter={12} style={{ padding: 16 }}>
-      <Col span={14}>
-        <Card title="E2 — Division Violation Heatmap" size="small" bodyStyle={{ padding: 0 }}>
-          {!EXEC_E2_DIV_SUMMARY
-            ? <div style={{ padding: 12 }}><NotConfigured name="EXEC_E2_DIV_SUMMARY" /></div>
-            : loading
-            ? <div style={{ height: 440, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin tip="Loading…" /></div>
-            : <DrillDownMap height="440px" divisionData={divisionData} districtData={{}} popMarkers={[]} level="national" />
-          }
-        </Card>
-      </Col>
-      <Col span={10}>
-        <Card title="Division Rankings" size="small" style={{ marginBottom: 12 }}>
-          <ReactECharts option={rankOpt} style={{ height: 220 }} showLoading={loading} />
-        </Card>
-        <Card title="Division Summary" size="small">
-          <Table
-            dataSource={divRows.map(r => ({ ...r, key: r.division, geoName: toGeoDiv(r.division || '') }))}
-            columns={[
-              { title: 'Division', dataIndex: 'geoName', ellipsis: true },
-              { title: 'Violations', dataIndex: 'violations', width: 75,
-                render: (v, r) => Number(v || r.total || 0) },
-              { title: 'Critical', dataIndex: 'critical', width: 65,
-                render: v => v > 0 ? <Text type="danger">{v}</Text> : '—' },
-            ]}
-            loading={loading}
-            size="small" pagination={false}
-          />
-        </Card>
-      </Col>
-    </Row>
+    <>
+      {/* Row 1: Map + right panel (ranking chart OR division detail) */}
+      <Row gutter={12} style={{ padding: '16px 16px 0' }}>
+        {/* Map — always national level; selectedDiv dims non-selected divisions */}
+        <Col span={14}>
+          <Card
+            title={selectedDiv ? `E2 — ${selectedDiv} Division` : 'E2 — Division Violation Map'}
+            size="small"
+            bodyStyle={{ padding: 0 }}
+            extra={selectedDiv && (
+              <Button size="small" icon={<ArrowLeftOutlined />} onClick={() => setSelectedDiv(null)}>
+                All Divisions
+              </Button>
+            )}
+          >
+            {!EXEC_E2_DIV_SUMMARY
+              ? <div style={{ padding: 12 }}><NotConfigured name="EXEC_E2_DIV_SUMMARY" /></div>
+              : <div style={{ position: 'relative' }}>
+                  <DrillDownMap
+                    height="480px"
+                    divisionData={divisionData}
+                    districtData={{}}
+                    popMarkers={[]}
+                    level="national"
+                    selectedDiv={selectedDiv}
+                    onDivClick={handleDivClick}
+                  />
+                  {loading && (
+                    <div style={{
+                      position: 'absolute', inset: 0, zIndex: 500,
+                      background: 'rgba(255,255,255,0.6)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Spin tip="Loading…" />
+                    </div>
+                  )}
+                </div>
+            }
+          </Card>
+        </Col>
+
+        {/* Right panel — ranking chart (national) or division KPI + ISP table (selected) */}
+        <Col span={10}>
+          {!selectedDiv ? (
+            <Card title="Division Violation Ranking" size="small" style={{ height: '100%' }}>
+              <ReactECharts option={rankOpt} style={{ height: 440 }} showLoading={loading} />
+            </Card>
+          ) : (
+            <>
+              {/* Division selected: KPI cards + ISP table */}
+              <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+                {[
+                  { label: 'Total',    val: selStats?.total,    color: '#1890ff' },
+                  { label: 'Critical', val: selStats?.critical, color: '#dc2626' },
+                  { label: 'High',     val: selStats?.high,     color: '#f97316' },
+                  { label: 'Medium',   val: selStats?.medium,   color: '#eab308' },
+                ].map(({ label, val, color }) => (
+                  <Col span={12} key={label}>
+                    <Card size="small" style={{ borderLeft: `4px solid ${color}` }}>
+                      <Statistic title={label} value={val ?? 0} valueStyle={{ color, fontSize: 20 }} />
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+              <Card title={`ISPs in ${selectedDiv}`} size="small">
+                <Table
+                  dataSource={ispRows.map((r, i) => ({ ...r, key: i }))}
+                  columns={ispCols}
+                  loading={ispLoading}
+                  size="middle"
+                  pagination={{ pageSize: 10, size: 'small', showTotal: t => `${t} ISPs` }}
+                  scroll={{ y: 300 }}
+                />
+              </Card>
+            </>
+          )}
+        </Col>
+      </Row>
+
+      {/* Row 2: Division Summary table — full width, national view only */}
+      {!selectedDiv && (
+        <Row style={{ padding: '12px 16px 16px' }}>
+          <Col span={24}>
+            <Card
+              title="Division Summary"
+              size="small"
+              extra={<Text type="secondary" style={{ fontSize: 11 }}>Click map or division name to drill in</Text>}
+            >
+              <Table
+                dataSource={divRows.map(r => ({
+                  ...r, key: r.division,
+                  geoName: toGeoDiv(r.division || ''),
+                  total: Number(r.total || r.violations || 0),
+                }))}
+                columns={[
+                  { title: 'Division', dataIndex: 'geoName', ellipsis: true,
+                    render: (v) => (
+                      <Button type="link" size="small" style={{ padding: 0 }}
+                        onClick={() => setSelectedDiv(v)}>{v}</Button>
+                    ) },
+                  { title: 'Total',    dataIndex: 'total',    width: 80,
+                    sorter: (a, b) => a.total - b.total, defaultSortOrder: 'descend' },
+                  { title: 'Critical', dataIndex: 'critical', width: 90,
+                    render: v => Number(v) > 0 ? <Text type="danger">{v}</Text> : '—' },
+                  { title: 'High',     dataIndex: 'high',     width: 80,
+                    render: v => Number(v) > 0 ? <Text style={{ color: '#f97316' }}>{v}</Text> : '—' },
+                  { title: 'Medium',   dataIndex: 'medium',   width: 90,
+                    render: v => Number(v) > 0 ? <Text style={{ color: '#eab308' }}>{v}</Text> : '—' },
+                  { title: 'Low',      dataIndex: 'low',      width: 80,
+                    render: v => Number(v) > 0 ? <Text type="success">{v}</Text> : '—' },
+                ]}
+                loading={loading}
+                size="middle"
+                pagination={false}
+              />
+            </Card>
+          </Col>
+        </Row>
+      )}
+    </>
   );
 }
 
