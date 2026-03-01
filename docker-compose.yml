@@ -112,7 +112,7 @@ services:
       # vite.config.js reads these via process.env to route /api and /tiles
       # requests to the correct containers on the Docker network.
       
-      METABASE_PROXY_TARGET: ${VITE_METABASE_URL:-http://localhost:3000}
+      METABASE_PROXY_TARGET: ${VITE_METABASE_URL:-http://metabase:3000}
       TILE_PROXY_TARGET:     http://martin:3000
 
       # ── Browser-side env (bundled into the JS by Vite) ───────────────────
