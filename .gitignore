@@ -54,3 +54,6 @@ build/
 .ipynb_checkpoints/
 
 /dummy_data/
+
+/*.bak
+/*.backup

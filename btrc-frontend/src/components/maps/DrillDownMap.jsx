@@ -25,35 +25,21 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   MapContainer, TileLayer, GeoJSON, CircleMarker,
-  Tooltip, useMap, LayersControl,
+  Tooltip, useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { leafletLayer } from 'protomaps-leaflet';
 import { Spin, Tooltip as AntTooltip } from 'antd';
 import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from '../../i18n';
-import { leafletLayer as protomapsLeafletLayer } from 'protomaps-leaflet';
-
-// ── ProtomapsLayer — renders PMTiles via useMap() (no @react-leaflet/core needed) ──
-// Directly adds/removes the Leaflet layer on mount/unmount.
-// Use as: {pmtilesVisible && <ProtomapsLayer url="..." />}
-const ProtomapsLayer = ({ url, theme = 'light' }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (!map || !url) return;
-    const layer = protomapsLeafletLayer({ url, theme });
-    map.addLayer(layer);
-    return () => { map.removeLayer(layer); };
-  }, [map, url, theme]);
-  return null;
-};
-
 // ── Tile sources ──────────────────────────────────────────────────────────────
 const CARTO_NL_URL  = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
 const CARTO_NL_ATTR = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors &copy; CARTO';
 const OSM_URL       = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTR      = '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>';
-
+// Martin XYZ tile URL — goes through Vite proxy (/tiles → martin:3000)
+const PMTILES_URL = import.meta.env.VITE_TILE_URL;
 // ── Bangladesh initial view ───────────────────────────────────────────────────
 const BD_CENTER = [23.68, 90.35];
 const BD_ZOOM   = 7;
@@ -181,6 +167,20 @@ const MapResizer = () => {
   return null;
 };
 
+// ── ProtomapsBaseLayer — renders Protomaps vector tiles via Martin XYZ endpoint
+// Pass url directly so sourcesToViews creates the internal source with key ""
+// which is what namedFlavor('light') paint rules expect.
+const ProtomapsBaseLayer = ({ url }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!url || !map) return;
+    const layer = leafletLayer({ url, flavor: 'light', lang: 'en' });
+    layer.addTo(map);
+    return () => { map.removeLayer(layer); };
+  }, [map, url]);
+  return null;
+};
+
 // ── Main component ─────────────────────────────────────────────────────────────
 const DrillDownMap = ({
   height         = '520px',
@@ -200,9 +200,10 @@ const DrillDownMap = ({
   const [distGeoJSON, setDistGeoJSON] = useState(null);
   const [fitBounds,   setFitBounds]   = useState(null);
   const [loading,     setLoading]     = useState(true);
-  const [maximized,      setMaximized]      = useState(false);
-  const [resizeKey,      setResizeKey]      = useState(0);
-  const [pmtilesVisible, setPmtilesVisible] = useState(false);
+  const [maximized,  setMaximized]  = useState(false);
+  const [resizeKey,  setResizeKey]  = useState(0);
+  // 'carto' | 'osm' | 'satellite' | 'pmtiles'
+  const [activeTile, setActiveTile] = useState('pmtiles');
   const divLayerRef  = useRef(null);
   const distLayerRef = useRef(null);
 
@@ -352,23 +353,22 @@ const DrillDownMap = ({
         {/* 1. Pane setup (runs first, before GeoLabelLayer) */}
         <MapPaneSetup />
 
-        {/* 2. Base tile layers */}
-        <LayersControl position="topright">
-          <LayersControl.BaseLayer checked name="Clean (No Labels)">
-            <TileLayer url={CARTO_NL_URL} attribution={CARTO_NL_ATTR} />
-          </LayersControl.BaseLayer>
-
-          <LayersControl.BaseLayer name="OpenStreetMap">
-            <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
-          </LayersControl.BaseLayer>
-
-          <LayersControl.BaseLayer name="Satellite">
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution="&copy; Esri"
-            />
-          </LayersControl.BaseLayer>
-        </LayersControl>
+        {/* 2. Base tile layers — controlled by activeTile state */}
+        {activeTile === 'carto' && (
+          <TileLayer url={CARTO_NL_URL} attribution={CARTO_NL_ATTR} />
+        )}
+        {activeTile === 'osm' && (
+          <TileLayer url={OSM_URL} attribution={OSM_ATTR} />
+        )}
+        {activeTile === 'satellite' && (
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution="&copy; Esri"
+          />
+        )}
+        {activeTile === 'pmtiles' && (
+          <ProtomapsBaseLayer url={PMTILES_URL} />
+        )}
 
         <FitBounds bounds={fitBounds} />
 
@@ -443,12 +443,7 @@ const DrillDownMap = ({
           />
         )}
 
-        {/* 7. Offline PMTiles layer — rendered when toggled on */}
-        {pmtilesVisible && (
-          <ProtomapsLayer url="/pmtiles/bangladesh.pmtiles" theme="light" />
-        )}
-
-        {/* 8. PoP markers in popPane (500) */}
+        {/* 7. PoP markers in popPane (500) */}
         {popMarkers.map(pop => (
           <CircleMarker
             key={pop.id}
@@ -475,9 +470,9 @@ const DrillDownMap = ({
         ))}
       </MapContainer>
 
-      {/* ── Map controls: Maximize / Reset — grouped card below LayersControl ── */}
+      {/* ── Map controls — Maximize / Reset / Tile selector ── */}
       <div style={{
-        position: 'absolute', top: 52, right: 10, zIndex: 1001,
+        position: 'absolute', top: 10, right: 10, zIndex: 1001,
         display: 'flex', flexDirection: 'column',
         background: 'rgba(255,255,255,0.95)',
         border: '2px solid rgba(0,0,0,0.2)',
@@ -485,6 +480,7 @@ const DrillDownMap = ({
         boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
         overflow: 'hidden',
       }}>
+        {/* Fullscreen */}
         <AntTooltip title={maximized ? 'Exit fullscreen' : 'Fullscreen map'} placement="left">
           <button
             onClick={toggleMaximize}
@@ -492,8 +488,7 @@ const DrillDownMap = ({
               width: 30, height: 30, border: 'none', cursor: 'pointer',
               background: 'transparent', display: 'flex',
               alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, color: '#333',
-              transition: 'background 0.15s',
+              fontSize: 14, color: '#333', transition: 'background 0.15s',
             }}
             onMouseEnter={e => e.currentTarget.style.background = '#f4f4f4'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -502,9 +497,9 @@ const DrillDownMap = ({
           </button>
         </AntTooltip>
 
-        {/* divider */}
         <div style={{ height: 1, background: 'rgba(0,0,0,0.2)', margin: '0 4px' }} />
 
+        {/* Reset view */}
         <AntTooltip title="Reset to Bangladesh view" placement="left">
           <button
             onClick={() => setFitBounds(null)}
@@ -512,8 +507,7 @@ const DrillDownMap = ({
               width: 30, height: 30, border: 'none', cursor: 'pointer',
               background: 'transparent', display: 'flex',
               alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, color: '#333',
-              transition: 'background 0.15s',
+              fontSize: 14, color: '#333', transition: 'background 0.15s',
             }}
             onMouseEnter={e => e.currentTarget.style.background = '#f4f4f4'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -522,26 +516,38 @@ const DrillDownMap = ({
           </button>
         </AntTooltip>
 
-        {/* divider */}
         <div style={{ height: 1, background: 'rgba(0,0,0,0.2)', margin: '0 4px' }} />
 
-        <AntTooltip title={pmtilesVisible ? 'Disable offline tiles' : 'Enable offline PMTiles'} placement="left">
-          <button
-            onClick={() => setPmtilesVisible(v => !v)}
-            style={{
-              width: 30, height: 30, border: 'none', cursor: 'pointer',
-              background: pmtilesVisible ? '#e6f4ff' : 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, fontWeight: 700,
-              color: pmtilesVisible ? '#1677ff' : '#555',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = pmtilesVisible ? '#bae0ff' : '#f4f4f4'}
-            onMouseLeave={e => e.currentTarget.style.background = pmtilesVisible ? '#e6f4ff' : 'transparent'}
-          >
-            PM
-          </button>
-        </AntTooltip>
+        {/* Tile selector — one button per source, active tile highlighted */}
+        {[
+          { key: 'carto',     label: 'CL',  title: 'Clean (No Labels)' },
+          { key: 'osm',       label: 'OS',  title: 'OpenStreetMap' },
+          { key: 'satellite', label: 'SAT', title: 'Satellite (Esri)' },
+          { key: 'pmtiles',   label: 'PM',  title: 'Offline PMTiles' },
+        ].map(({ key, label, title }, idx, arr) => (
+          <React.Fragment key={key}>
+            <AntTooltip title={title} placement="left">
+              <button
+                onClick={() => setActiveTile(key)}
+                style={{
+                  width: 30, height: 30, border: 'none', cursor: 'pointer',
+                  background: activeTile === key ? '#e6f4ff' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, fontWeight: 700,
+                  color: activeTile === key ? '#1677ff' : '#555',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = activeTile === key ? '#bae0ff' : '#f4f4f4'}
+                onMouseLeave={e => e.currentTarget.style.background = activeTile === key ? '#e6f4ff' : 'transparent'}
+              >
+                {label}
+              </button>
+            </AntTooltip>
+            {idx < arr.length - 1 && (
+              <div style={{ height: 1, background: 'rgba(0,0,0,0.1)', margin: '0 4px' }} />
+            )}
+          </React.Fragment>
+        ))}
       </div>
 
       {/* Colour legend */}

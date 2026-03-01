@@ -31,44 +31,9 @@ const serveGeodataPlugin = {
   },
 };
 
-// ── PMTiles static file server plugin ─────────────────────────────────────────
-// Intercepts GET /pmtiles/* and serves files from ../tiles/ with full
-// HTTP Range request support (required by protomaps-leaflet).
-const servePmtilesPlugin = {
-  name: 'serve-pmtiles',
-  configureServer(server) {
-    server.middlewares.use('/pmtiles', (req, res, next) => {
-      const tilesDir = resolve(__dirname, '../tiles');
-      const filePath = join(tilesDir, (req.url || '/').replace(/^\//, ''));
-
-      let stat;
-      try { stat = statSync(filePath); } catch { return next(); }
-
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', 'Range');
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Accept-Ranges', 'bytes');
-
-      const range = req.headers['range'];
-      if (range) {
-        const [startStr, endStr] = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(startStr, 10);
-        const end   = endStr ? parseInt(endStr, 10) : stat.size - 1;
-        res.writeHead(206, {
-          'Content-Range':  `bytes ${start}-${end}/${stat.size}`,
-          'Content-Length': end - start + 1,
-        });
-        createReadStream(filePath, { start, end }).pipe(res);
-      } else {
-        res.writeHead(200, { 'Content-Length': stat.size });
-        createReadStream(filePath).pipe(res);
-      }
-    });
-  },
-};
 
 export default defineConfig({
-  plugins: [react(), serveGeodataPlugin, servePmtilesPlugin],
+  plugins: [react(), serveGeodataPlugin],
   server: {
     host: '0.0.0.0',
     port: 5173,
@@ -87,19 +52,19 @@ export default defineConfig({
       '/tiles': {
         target: process.env.TILE_PROXY_TARGET || 'http://localhost:3001',
         changeOrigin: true,
-        rewrite: (path) => path,
+        rewrite: (path) => path.replace(/^\/tiles/, ''),
       },
     },
   },
   resolve: {
     alias: {
       // Resolve vendor copy of protomaps-leaflet (ESM build)
-      'protomaps-leaflet': resolve(__dirname, 'src/vendor/protomaps-leaflet/dist/esm/index.js'),
+      // 'protomaps-leaflet': resolve(__dirname, 'src/vendor/protomaps-leaflet/dist/esm/index.js'),
     },
   },
   optimizeDeps: {
     include: [],
-    exclude: ['protomaps-leaflet'],
+    exclude: [],
   },
   build: {
     outDir: 'dist',
