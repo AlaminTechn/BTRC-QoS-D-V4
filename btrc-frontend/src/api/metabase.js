@@ -120,11 +120,13 @@ class MetabaseAPI {
 
   _formatParams(params) {
     if (!params || !Object.keys(params).length) return {};
-    const DATE_KEYS = new Set(['start_date', 'end_date']);
+    // All template tags in our cards are type "text" — use 'category' for all.
+    // 'date/single' only works for Metabase "date" type template tags; our SQL
+    // manually casts {{start_date}} / {{end_date}} via CAST(... AS timestamptz).
     const parameters = Object.entries(params)
       .filter(([, v]) => v != null && v !== '')
       .map(([key, value]) => ({
-        type:   DATE_KEYS.has(key) ? 'date/single' : 'category',
+        type:   'category',
         target: ['variable', ['template-tag', key]],
         value,
       }));

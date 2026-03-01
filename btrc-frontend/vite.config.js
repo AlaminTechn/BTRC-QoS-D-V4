@@ -74,7 +74,7 @@ export default defineConfig({
           leaflet:       ['leaflet', 'react-leaflet'],
           antd:          ['antd', '@ant-design/icons'],
           echarts:       ['echarts', 'echarts-for-react'],
-          protomaps:     ['protomaps-leaflet'],
+          protomaps:     ['protomaps-leaflet', '@protomaps/basemaps'],
         },
       },
     },

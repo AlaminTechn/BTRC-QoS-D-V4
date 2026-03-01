@@ -15,6 +15,7 @@
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",
     "leaflet": "^1.9.4",
+    "@protomaps/basemaps": "^5.7.0",
     "protomaps-leaflet": "^5.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

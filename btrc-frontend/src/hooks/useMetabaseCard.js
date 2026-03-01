@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { metabaseAPI } from '../api/metabase';
 
-const CACHE_PREFIX = 'mb_cache_';
+const CACHE_PREFIX = 'mb_cache_v2_'; // v2: switched param type to 'category' for all tags
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const readCache = (key) => {

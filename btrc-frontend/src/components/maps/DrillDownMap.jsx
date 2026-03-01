@@ -29,7 +29,8 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { leafletLayer } from 'protomaps-leaflet';
+import { leafletLayer, paintRules } from 'protomaps-leaflet';
+import { namedFlavor } from '@protomaps/basemaps';
 import { Spin, Tooltip as AntTooltip } from 'antd';
 import { FullscreenOutlined, FullscreenExitOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from '../../i18n';
@@ -168,13 +169,22 @@ const MapResizer = () => {
 };
 
 // ── ProtomapsBaseLayer — renders Protomaps vector tiles via Martin XYZ endpoint
-// Pass url directly so sourcesToViews creates the internal source with key ""
-// which is what namedFlavor('light') paint rules expect.
+// Uses explicit paintRules (no flavor) so we can pass labelRules: [] to suppress
+// all built-in place-name labels. Our GeoLabelLayer handles labels instead.
+// NOTE: when 'flavor' is set, protomaps-leaflet ignores explicit labelRules.
+const _pmTheme = namedFlavor('light');
+const _pmPaintRules = paintRules(_pmTheme);
+
 const ProtomapsBaseLayer = ({ url }) => {
   const map = useMap();
   useEffect(() => {
     if (!url || !map) return;
-    const layer = leafletLayer({ url, flavor: 'light', lang: 'en' });
+    const layer = leafletLayer({
+      url,
+      paintRules:      _pmPaintRules,
+      labelRules:      [],            // suppress all built-in labels
+      backgroundColor: _pmTheme.background,
+    });
     layer.addTo(map);
     return () => { map.removeLayer(layer); };
   }, [map, url]);
