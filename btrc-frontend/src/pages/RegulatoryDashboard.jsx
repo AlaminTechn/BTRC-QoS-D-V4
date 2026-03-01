@@ -236,14 +236,46 @@ function R2Tab() {
             title="R2 — Regional Drill-Down Map"
             size="small"
             bodyStyle={{ padding: 0 }}
+            extra={
+              <Space size={6}>
+                {/* Division quick-select — drills map to that division */}
+                <Select
+                  placeholder="Jump to Division"
+                  allowClear
+                  size="small"
+                  style={{ width: 148 }}
+                  value={selectedDiv || undefined}
+                  onChange={(val) => val ? drillToDiv(val) : resetDrill()}
+                  options={Object.keys(divisionData).sort().map(v => ({ value: v, label: v }))}
+                  showSearch
+                  filterOption={(input, opt) =>
+                    opt.label.toLowerCase().includes(input.toLowerCase())
+                  }
+                />
+                {/* District quick-select — only active after a division is chosen */}
+                <Select
+                  placeholder="Jump to District"
+                  allowClear
+                  size="small"
+                  style={{ width: 148 }}
+                  value={selectedDist || undefined}
+                  disabled={!selectedDiv}
+                  onChange={(val) => val ? drillToDist(val) : drillUp()}
+                  options={Object.keys(districtData).sort().map(v => ({ value: v, label: v }))}
+                  showSearch
+                  filterOption={(input, opt) =>
+                    opt.label.toLowerCase().includes(input.toLowerCase())
+                  }
+                />
+              </Space>
+            }
           >
-            {loading ? (
-              <div style={{ height: 480, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Spin size="large" tip="Fetching map data…" />
-              </div>
-            ) : (
+            {/* Always keep DrillDownMap mounted — unmounting mid-fetch causes
+                Protomaps PBF "Unimplemented type: 4" parsing errors on in-flight
+                tile responses. Overlay spinner instead. */}
+            <div style={{ position: 'relative' }}>
               <DrillDownMap
-                height="480px"
+                height="520px"
                 divisionData={divisionData}
                 districtData={districtData}
                 popMarkers={popMarkers}
@@ -253,7 +285,16 @@ function R2Tab() {
                 onDivClick={drillToDiv}
                 onDistClick={drillToDist}
               />
-            )}
+              {loading && (
+                <div style={{
+                  position: 'absolute', inset: 0, zIndex: 500,
+                  background: 'rgba(255,255,255,0.60)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Spin size="large" tip="Fetching map data…" />
+                </div>
+              )}
+            </div>
           </Card>
         </Col>
 
@@ -278,7 +319,7 @@ function R2Tab() {
                   { title: 'High',     dataIndex: 'high',     width: 50,
                     render: v => v > 0 ? <Text style={{ color: '#f97316' }}>{v}</Text> : '—' },
                 ]}
-                size="small" pagination={false} rowKey="name" scroll={{ y: 420 }}
+                size="middle" pagination={false} rowKey="name" scroll={{ y: 480 }}
               />
             </Card>
           )}
@@ -299,7 +340,7 @@ function R2Tab() {
                   { title: 'Critical', dataIndex: 'critical', width: 65,
                     render: v => v > 0 ? <Text type="danger">{v}</Text> : '—' },
                 ]}
-                size="small" scroll={{ y: 420 }} pagination={false}
+                size="middle" scroll={{ y: 480 }} pagination={false}
               />
             </Card>
           )}
@@ -332,8 +373,8 @@ function R2Tab() {
                 dataSource={ispData.map((r, i) => ({ ...r, key: i }))}
                 columns={ispCols}
                 loading={loading}
-                size="small"
-                scroll={{ x: 700, y: 300 }}
+                size="middle"
+                scroll={{ x: 700, y: 400 }}
                 pagination={{ pageSize: 15, size: 'small', showTotal: t => `${t} ISPs` }}
               />
             </Card>

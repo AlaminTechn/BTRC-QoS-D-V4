@@ -3,6 +3,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 #root { height: 100vh; }
 .leaflet-container { font-family: inherit; }
 
+/* ── Ant Design Card — give small-size card headers more breathing room ────── */
+.ant-card-small > .ant-card-head {
+  min-height: 46px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+}
+.ant-card-small > .ant-card-head .ant-card-head-wrapper {
+  width: 100%;
+}
+
+/* ── Ant Design Table — prevent header cell text from word-breaking ─────────── */
+.ant-table-thead > tr > th,
+.ant-table-thead > tr > td {
+  white-space: nowrap;
+}
+
 /* ── Map geo labels (rendered via Leaflet divIcon in labelPane z-450) ─────── */
 .map-geo-label-wrapper {
   pointer-events: none;

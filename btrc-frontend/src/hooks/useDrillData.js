@@ -6,6 +6,11 @@
  *
  * Drill levels: national → division → district
  *
+ * Global filters (ISP / date range / division from FilterBar) are merged into
+ * every fetchCard call so the map choropleth and PoP markers reflect the
+ * active filter selection.  Drill-state division/district OVERRIDE any
+ * same-key values coming from the global filter.
+ *
  * Returns:
  *   divisionData  { [geoName]: { total, critical, high, medium, low } }
  *   districtData  { [geoName]: { total, critical, high, medium, low } }
@@ -18,8 +23,9 @@
  *   drillToDiv(geoName), drillToDist(geoName), drillUp(), resetDrill()
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { metabaseAPI } from '../api/metabase';
+import { useFilter } from '../contexts/FilterContext';
 import {
   REG_R2_DIV_VIOLATIONS,
   REG_R2_DIST_VIOLATIONS,
@@ -29,7 +35,6 @@ import {
 
 // ── Name mappings (DB name_en → GeoJSON property) ──────────────────────────
 // Division DB names match GeoJSON NAME_1 exactly — no mapping needed.
-const DIV_DB_TO_GEO  = {};
 const DIST_DB_TO_GEO = {
   Bogura: 'Bogra', Brahmanbaria: 'Brahamanbaria', Chapainawabganj: 'Nawabganj',
   Chattogram: 'Chittagong', Coxsbazar: "Cox's Bazar", Jashore: 'Jessore',
@@ -60,7 +65,7 @@ const parseRows = (result) => {
 const buildDivisionData = (rows) => {
   const d = {};
   rows.forEach((r) => {
-    const geoName = toGeoDiv(r.division || r.name_en || '');
+    const geoName = r.division || r.name_en || '';
     if (geoName) d[geoName] = {
       total:    Number(r.total    || 0),
       critical: Number(r.critical || 0),
@@ -95,14 +100,53 @@ const fetchCard = async (cardId, params = {}) => {
   return parseRows(result);
 };
 
+// ── Normalise PoP rows ─────────────────────────────────────────────────────
+function _normalisePopRows(rows) {
+  return rows
+    .filter(r => r.latitude && r.longitude)
+    .map(r => ({
+      ...r,
+      violations: Number(r.violations || 0),
+      critical:   Number(r.critical   || 0),
+      latitude:   Number(r.latitude),
+      longitude:  Number(r.longitude),
+    }));
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Hook
 // ══════════════════════════════════════════════════════════════════════════════
 export const useDrillData = () => {
+  // ── Global filter params (ISP + date range + optional division from FilterBar)
+  const { activeParams } = useFilter();
+
+  // We forward ALL global filter keys to the card queries.
+  // At drill levels, drill-state division/district are spread AFTER filterParams
+  // so they take priority over any same-key values from the FilterBar.
+  const filterParams = useMemo(() => {
+    const p = {};
+    if (activeParams.isp)        p.isp        = activeParams.isp;
+    if (activeParams.start_date) p.start_date = activeParams.start_date;
+    if (activeParams.end_date)   p.end_date   = activeParams.end_date;
+    // Include FilterBar's division/district — only meaningful at national level;
+    // at drill levels the drill-state values override these below.
+    if (activeParams.division)   p.division   = activeParams.division;
+    if (activeParams.district)   p.district   = activeParams.district;
+    return p;
+  }, [
+    activeParams.isp,
+    activeParams.start_date,
+    activeParams.end_date,
+    activeParams.division,
+    activeParams.district,
+  ]);
+
+  // ── Drill state ────────────────────────────────────────────────────────────
   const [level,        setLevel]        = useState('national');
   const [selectedDiv,  setSelectedDiv]  = useState(null); // GeoJSON NAME_1
   const [selectedDist, setSelectedDist] = useState(null); // GeoJSON shapeName
 
+  // ── Data ───────────────────────────────────────────────────────────────────
   const [divisionData, setDivisionData] = useState({});
   const [districtData, setDistrictData] = useState({});
   const [popMarkers,   setPopMarkers]   = useState([]);
@@ -111,85 +155,102 @@ export const useDrillData = () => {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
-  // ── Load national division data ───────────────────────────────────────────
-  const loadNational = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await fetchCard(REG_R2_DIV_VIOLATIONS);
-      setDivisionData(buildDivisionData(rows));
-    } catch (e) {
-      setError(e.message || 'Failed to load division data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // ── Single effect: re-fetch whenever drill state OR global filters change ──
+  // Cancellation flag prevents stale setState after unmount or rapid changes.
+  const filterKey = JSON.stringify(filterParams);
 
-  // ── Drill to division ─────────────────────────────────────────────────────
-  const drillToDiv = useCallback(async (geoName) => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        if (level === 'national') {
+          // Card 65 only has: division, isp, start_date, end_date — strip district.
+          // (A district filter makes no sense on a national division choropleth.)
+          // eslint-disable-next-line no-unused-vars
+          const { district: _d, ...card65Params } = filterParams;
+          const rows = await fetchCard(REG_R2_DIV_VIOLATIONS, card65Params);
+          if (!cancelled) setDivisionData(buildDivisionData(rows));
+
+        } else if (level === 'division' && selectedDiv) {
+          // Drill-state division overrides FilterBar division
+          const params = { ...filterParams, division: toDbDiv(selectedDiv) };
+          delete params.district; // district not applicable at division level
+          const [distRows, popRows, ispRows] = await Promise.all([
+            fetchCard(REG_R2_DIST_VIOLATIONS, params),
+            fetchCard(REG_R2_POP_MARKERS,     params),
+            fetchCard(REG_R2_ISP_BY_AREA,     params),
+          ]);
+          if (!cancelled) {
+            setDistrictData(buildDistrictData(distRows));
+            setPopMarkers(_normalisePopRows(popRows));
+            setIspData(ispRows);
+          }
+
+        } else if (level === 'district' && selectedDiv && selectedDist) {
+          // Drill-state division + district override FilterBar values
+          const params = {
+            ...filterParams,
+            division: toDbDiv(selectedDiv),
+            district: toDbDist(selectedDist),
+          };
+          const [popRows, ispRows] = await Promise.all([
+            fetchCard(REG_R2_POP_MARKERS, params),
+            fetchCard(REG_R2_ISP_BY_AREA, params),
+          ]);
+          if (!cancelled) {
+            setPopMarkers(_normalisePopRows(popRows));
+            setIspData(ispRows);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message || 'Failed to load map data');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [level, selectedDiv, selectedDist, filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Drill actions — update state only; the effect above handles fetching ──
+
+  const drillToDiv = useCallback((geoName) => {
+    setLoading(true); // show spinner immediately before effect fires
     setSelectedDiv(geoName);
     setSelectedDist(null);
     setLevel('division');
-    const dbName = toDbDiv(geoName);
-    try {
-      const [distRows, popRows, ispRows] = await Promise.all([
-        fetchCard(REG_R2_DIST_VIOLATIONS, { division: dbName }),
-        fetchCard(REG_R2_POP_MARKERS,     { division: dbName }),
-        fetchCard(REG_R2_ISP_BY_AREA,     { division: dbName }),
-      ]);
-      setDistrictData(buildDistrictData(distRows));
-      setPopMarkers(_normalisePopRows(popRows));
-      setIspData(ispRows);
-    } catch (e) {
-      setError(e.message || 'Failed to load division detail');
-    } finally {
-      setLoading(false);
-    }
+    setDistrictData({});
+    setPopMarkers([]);
+    setIspData([]);
   }, []);
 
-  // ── Drill to district ─────────────────────────────────────────────────────
-  const drillToDist = useCallback(async (geoDistName) => {
-    if (!selectedDiv) return;
+  const drillToDist = useCallback((geoDistName) => {
     setLoading(true);
-    setError(null);
     setSelectedDist(geoDistName);
     setLevel('district');
-    const dbDivName  = toDbDiv(selectedDiv);
-    const dbDistName = toDbDist(geoDistName);
-    try {
-      const [popRows, ispRows] = await Promise.all([
-        fetchCard(REG_R2_POP_MARKERS, { division: dbDivName, district: dbDistName }),
-        fetchCard(REG_R2_ISP_BY_AREA, { division: dbDivName, district: dbDistName }),
-      ]);
-      setPopMarkers(_normalisePopRows(popRows));
-      setIspData(ispRows);
-    } catch (e) {
-      setError(e.message || 'Failed to load district detail');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDiv]);
+    setPopMarkers([]);
+    setIspData([]);
+  }, []);
 
-  // ── Navigate up ───────────────────────────────────────────────────────────
   const drillUp = useCallback(() => {
     if (level === 'district') {
+      setLoading(true);
       setLevel('division');
       setSelectedDist(null);
-      if (selectedDiv) {
-        // re-fetch division level data
-        drillToDiv(selectedDiv);
-        return;
-      }
+      // districtData stays visible; effect re-fetches PoPs+ISPs for division level
     } else if (level === 'division') {
       setLevel('national');
       setSelectedDiv(null);
+      setSelectedDist(null);
       setDistrictData({});
       setPopMarkers([]);
       setIspData([]);
     }
-  }, [level, selectedDiv, drillToDiv]);
+  }, [level]);
 
   const resetDrill = useCallback(() => {
     setLevel('national');
@@ -199,8 +260,6 @@ export const useDrillData = () => {
     setPopMarkers([]);
     setIspData([]);
   }, []);
-
-  useEffect(() => { loadNational(); }, [loadNational]);
 
   return {
     divisionData,
@@ -218,16 +277,3 @@ export const useDrillData = () => {
     resetDrill,
   };
 };
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-function _normalisePopRows(rows) {
-  return rows
-    .filter(r => r.latitude && r.longitude)
-    .map(r => ({
-      ...r,
-      violations: Number(r.violations || 0),
-      critical:   Number(r.critical   || 0),
-      latitude:   Number(r.latitude),
-      longitude:  Number(r.longitude),
-    }));
-}
